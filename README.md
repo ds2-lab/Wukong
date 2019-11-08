@@ -2,6 +2,9 @@
 
 A fast and efficient serverless DAG engine.
 
+Paper: In Search of a Fast and Efficient Serverless DAG Engine
+https://arxiv.org/abs/1910.05896
+
 ## What is Wukong?
 
 Wukong is a serverless DAG scheduler attuned to AWS Lambda. Wukong provides decentralized scheduling using a combination of static and dynamic scheduling. Wukong supports general Python data analytics workloads. 
