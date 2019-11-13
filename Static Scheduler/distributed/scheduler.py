@@ -1894,14 +1894,14 @@ class Scheduler(ServerNode):
             
             # If this task has dependencies, then we need to store payload/path and dependency counters in Redis.
             if len(current_task.dependencies) > 0:
-                redis_dep_counter_key = str(ts.key) + "---dep-counter"
+                redis_dep_counter_key = str(current_task.key) + "---dep-counter"
                 
                 # Store the payload and the dependency counters for this task state.
                 # hash_obj = hashlib.md5(ts.key.encode())
                 # val = int(hash_obj.hexdigest(), 16)
                 # dict_index = val % self.num_redis_clients
                 # initial_payloads[dict_index][redis_dep_counter_key] = 0
-                associated_redis_client = self.hash_ring.get_node_instance(ts.key)
+                associated_redis_client = self.hash_ring.get_node_instance(current_task.key)
                 initial_payloads[associated_redis_client][redis_dep_counter_key] = 0
                 #if val % 2 == 0:
                 #    initial_redis_payload1[redis_dep_counter_key] = 0
