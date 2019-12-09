@@ -5,9 +5,13 @@ A fast and efficient serverless DAG engine.
 Paper: In Search of a Fast and Efficient Serverless DAG Engine
 https://arxiv.org/abs/1910.05896
 
+This branch contains the version of Wukong used during the writing of the paper linked above. For the latest work-in-progress version of Wukong, please see the [Latest](https://github.com/Scusemua/Wukong/tree/latest) branch.
+
 ## What is Wukong?
 
 Wukong is a serverless DAG scheduler attuned to AWS Lambda. Wukong provides decentralized scheduling using a combination of static and dynamic scheduling. Wukong supports general Python data analytics workloads. 
+
+![Architecture](https://i.imgur.com/XjAsrVm.png "Wukong's Architecture")
 
 ## Code Overview/Explanation 
 
@@ -25,9 +29,13 @@ The Scheduler listens for results from Lambda using a "Subscriber Process", whic
 
 ### The KV Store Proxy
 
+This component is used to parallelize Lambda function invocations in the middle of a workload's execution.
+
 ...
 
 ### The AWS Lambda Task Executor
+
+The Task Executors are responsible for executing tasks and performing dynamic scheduling. 
 
 ...
 
