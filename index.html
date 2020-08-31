@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <!-- Initialize EnlighterJS -->
+  <meta name="EnlighterJS" content="Advanced javascript based syntax highlighting" data-indent="4" data-selector-block="pre" data-selector-inline="code" data-language="python" />
+
+  <title>Wukong - Serverless Data Analytics</title>
+
+  <!-- Bootstrap core CSS -->
+  <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+
+  <!-- Custom fonts for this template -->
+  <link href="vendor/fontawesome-free/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/simple-line-icons/css/simple-line-icons.css">
+  <link href="https://fonts.googleapis.com/css?family=Lato" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css?family=Catamaran:100,200,300,400,500,600,700,800,900" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css?family=Muli" rel="stylesheet">
+
+  <!-- Favicon -->
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="manifest" href="/site.webmanifest">
+
+  <script src="https://kit.fontawesome.com/03b5fe4d8a.js" crossorigin="anonymous"></script>
+
+  <!-- Hover.css -->
+  <link href="css/hover.css" rel="stylesheet" media="all">
+
+  <!-- Plugin CSS -->
+  <link rel="stylesheet" href="device-mockups/device-mockups.min.css">
+
+  <!-- Custom styles for this template -->
+  <link href="css/new-age.css" rel="stylesheet">
+
+  <!-- Include EnlighterJS Styles -->
+  <link rel="stylesheet" type="text/css" href="css/EnlighterJS.css" />
+
+  <!-- Include MooTools Framework -->
+  <script type="text/javascript" src="js/MooTools-Core-1.6.0.js"></script>
+
+  <!-- Include EnlighterJS -->
+  <script type="text/javascript" src="js/EnlighterJS.min.js" ></script>  
+
+  <!-- GitHub buttons. -->
+  <script async defer src="https://buttons.github.io/buttons.js"></script>
+
+</head>
+
+<body id="page-top">
+
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg navbar-light fixed-top" id="mainNav">
+    <div class="container">
+      <a class="navbar-brand js-scroll-trigger hvr-grow" href="#page-top">WUKONG</a>
+      <div class="collapse navbar-collapse" id="navbarResponsive">
+        <ul class="navbar-nav ml-auto">
+          <li class="nav-item">
+            <a class="nav-link js-scroll-trigger hvr-grow" href="#features">Features</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link js-scroll-trigger hvr-grow" href="#github">GitHub</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link js-scroll-trigger hvr-grow" href="#examples">Examples</a>
+          </li> 
+          <li class="nav-item">
+            <a class="nav-link js-scroll-trigger hvr-grow" href="#papers">Papers</a>
+          </li>  
+          <li class="nav-item">
+            <a class="nav-link js-scroll-trigger hvr-grow" href="#community">Community</a>
+          </li>                   
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <header class="masthead shadowed">
+    <div class="container h-100">
+      <div class="row h-100">
+        <div class="col-lg my-auto">
+          <div class="header-content mx-auto text-center">
+            <h1 class="mb-5"><i class="highlight-text-italic">Fast & Efficient</i> Serverless Data Analytics</h1>
+            <h3 class="mb-5"><i class="highlight-text">Wukong</i> is a Serverless DAG Engine built atop <a href="https://aws.amazon.com/lambda/">AWS Lambda</a> and <a href="https://dask.org/">Dask</a>.</h3>
+            <a href="#github" class="btn btn-outline btn-xl js-scroll-trigger">Download</a>
+          </div>
+        </div>    
+      </div>
+    </div>
+  </header>
+
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-heading text-center">
+        <h2>Cheap. Fast. Easy to Use.</h2>
+        <p class="text-muted">Check out what you can do with Wukong</p>
+        <hr>
+      </div>
+      <div class="d-flex justify-content-center">
+        <div class="col-lg-10 my-auto">
+          <div class="container-fluid">
+            <div class="row">
+              <div class="col-lg-4">
+                <div class="feature-item">
+                  <i class="icon-present fas fa-hand-holding-usd text-primary hvr-grow"></i>
+                  <h3>Cost Effective</h3>
+                  <p class="text-muted">Wukong's pay-per-use pricing keeps costs low.</p>
+                </div>
+              </div>
+              <div class="col-lg-4">
+                <div class="feature-item">
+                  <i class="icon-present fas fas fa-laptop text-primary hvr-grow"></i>
+                  <h3>Easy to Use</h3>
+                  <p class="text-muted">Wukong can be easily deployed in seconds on home computers or in the cloud.</p>
+                </div>
+              </div>
+              <div class="col-lg-4">
+                <div class="feature-item">
+                  <i class="icon-present icon-lock-open text-primary hvr-grow"></i>
+                  <h3>Open Source</h3>
+                  <p class="text-muted">Wukong is open-source. Start contributing today.</p>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-lg-4">
+                <div class="feature-item">
+                  <i class="icon-present fab fa-cloudversify hvr-grow"></i>
+                  <h3>Highly Scalable</h3>
+                  <p class="text-muted">Wukong uses serverless computing to scale to thousands of executors in seconds.</p>
+                </div>
+              </div>
+              <div class="col-lg-4">
+                <div class="feature-item">
+                  <i class="icon-present fas fa-code hvr-grow"></i>
+                  <h3>Applications</h3>
+                  <p class="text-muted">From machine learning & linear algebra to data analytics, Wukong can do it all.</p>
+                </div>
+              </div>
+              <div class="col-lg-4">
+                <div class="feature-item">
+                  <i class="icon-present fas fa-tachometer-alt hvr-grow"></i>
+                  <h3>Performant</h3>
+                  <p class="text-muted">Wukong delivers best-in-class end-to-end performance for a variety of workloads.</p>
+                </div>
+              </div>                       
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="download bg-primary text-center" id="github">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-10 mx-auto">
+          <h2 class="section-heading">Stop waiting. Start building.</h2>
+          <p>Wukong is open source. Head over to GitHub to get started today.</p>
+          <div class="badges">
+            <a href="https://github.com/mason-leap-lab/Wukong" class="btn btn-outline-alt btn-xxl js-scroll-trigger hvr-grow"><i class="fab fa-github fa-lg"></i> GitHub</a>
+          </div>          
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="examples" id="examples">
+    <div class="examples-content">
+      <div class="container">
+        <h2 class="text-center">Sample Code</h2>
+        <div>
+          <pre data-enlighter-language="python" data-enlighter-theme="beyond" data-enlighter-group="wukong-examples" data-enlighter-linenumbers="false" data-enlighter-title="SVD (M x N)">
+            # Generate random input data.
+            X = da.random.random((128000, 100), chunks = (10000, 100)) 
+            
+            # Prepare SVD computation.
+            u, s, v = da.linalg.svd(X) 
+            
+            # Begin execution.
+            result = u.compute()
+            result = s.compute()
+            result = v.compute()
+          </pre>
+
+          <pre data-enlighter-language="python" data-enlighter-theme="beyond" data-enlighter-group="wukong-examples" data-enlighter-linenumbers="false" data-enlighter-title="SVD (N x N)">
+            # Generate random input data.
+            X = da.random.random((10000, 10000), chunks = (2000, 2000))
+            
+            # Prepare SVD computation.
+            u, s, v = da.linalg.svd_compressed(X, k = 5)
+            
+            # Begin execution.
+            result = u.compute()
+            result = s.compute()
+            result = v.compute()
+          </pre>
+
+          <pre data-enlighter-language="python" data-enlighter-group="wukong-examples" data-enlighter-linenumbers="false" data-enlighter-title="Matrix Multiplication">
+            # Generate random input data.
+            X = da.random.random((10000, 10000), chunks = (1000, 1000)) 
+
+            # Prepare GEMM computation.
+            XX = da.matmul(X, X)
+            
+            # Begin execution.
+            result = XX.compute()
+          </pre>
+
+          <pre data-enlighter-language="python" data-enlighter-group="wukong-examples" data-enlighter-linenumbers="false" data-enlighter-title="TSQR">
+            # Generate random input data.
+            X = da.random.random((32768, 128), chunks = (8192, 128))
+
+            # Prepare GEMM computation.
+            q,r = da.linalg.tsqr(X)
+            
+            # Begin execution.
+            res_q = q.compute()
+            res_r = r.compute()
+          </pre>
+
+          <pre data-enlighter-language="python" data-enlighter-group="wukong-examples" data-enlighter-linenumbers="false" data-enlighter-title="Support Vector Classification">
+            # Prepare classifier.
+            X, y = sklearn.datasets.make_classification(n_samples=1000)
+            clf = ParallelPostFit(SVC(gamma='scale'))
+            clf.fit(X, y)
+            
+            # Prepare the workload and begin execution.
+            X, y = dask_ml.datasets.make_classification(n_samples = 1024000, random_state = 1024000, chunks = 10240)
+
+            result = clf.predict(X).compute()
+          </pre>
+
+          <pre data-enlighter-language="python" data-enlighter-group="wukong-examples" data-enlighter-linenumbers="false" data-enlighter-title="Filter Dataframe">
+            import pandas as pd
+            
+            # Read dataframe from file.
+            df = pd.read_csv('employees.csv')
+
+            # Create Dask dataframe.
+            dask_df = dask.dataframe.from_pandas(df, npartitions = 64)
+
+            # Prepare and perform operation.
+            filtered_df = dask_df[dask_df['salary'] > 50000]
+            filtered_df.compute()
+          </pre>                     
+        </div>
+      </div>
+    </div>
+    <div class="overlay"></div>
+  </section>
+
+  <section class="papers" id="papers">
+    <div class="papers-content">
+      <div class="container">
+        <h2>Publications</h2>
+        <div class="custom-card shadowed">
+          <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+              <h5>B. Carver, J. Zhang, A. Wang and Y. Cheng, "In Search of a Fast and Efficient Serverless DAG Engine," <em>2019 IEEE/ACM Fourth International Parallel Data Systems Workshop (PDSW)</em>, 2019</h5>
+              <a class="card-link" target="_blank" rel="noopener noreferrer" href="https://arxiv.org/abs/1910.05896">Paper</a>
+              <a class="card-link" target="_blank" rel="noopener noreferrer" href="http://www.pdsw.org/pdsw19/slides/BenCarver-pdsw19.pdf">Slides</a>               
+            </li>
+            <li class="list-group-item">
+              <h5>B. Carver, J. Zhang, A. Wang, A. Anwar, P. Wu, Y. Cheng, "Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing," <em>2020 ACM Symposium on Cloud Computing (SoCC)</em>, 2020 <b>[To Appear]</b></h5>
+              <h6>Paper & Slides links coming soon!</h6>
+              <!-- <a class="card-link" target="_blank" rel="noopener noreferrer" href="">Paper</a> -->
+              <!-- <a class="card-link" target="_blank" rel="noopener noreferrer" href="">Slides</a>                -->
+            </li>            
+          </ul>      
+        </div>
+      </div>
+    </div>
+    <div class="overlay"></div>
+  </section>  
+
+  <section class="community bg-primary" id="community">
+    <div class="container">
+      <h2>Join the Community</h2>
+      <ul class="list-inline list-social">
+        <li class="list-inline-item social-twitter hvr-grow">
+          <a href="#">
+            <i class="fab fa-twitter"></i>
+          </a>
+        </li>
+        <li class="list-inline-item social-facebook hvr-grow">
+          <a href="#">
+            <i class="fab fa-facebook-f"></i>
+          </a>
+        </li>
+        <li class="list-inline-item social-github hvr-grow">
+          <a href="https://github.com/mason-leap-lab/Wukong">
+            <i class="fab fa-github"></i>
+          </a>
+        </li>
+      </ul>
+      <ul class="list-inline" style="margin: 10px;">
+        <li class="list-inline-item">
+          <a class="github-button" href="https://github.com/Scusemua" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-size="large" aria-label="Follow @Scusemua on GitHub">Follow @Scusemua</a>          
+        </li>
+        <li class="list-inline-item">
+          <a class="github-button" href="https://github.com/mason-leap-lab/Wukong" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star mason-leap-lab/Wukong on GitHub">Star</a>              
+        </li>
+      </ul>      
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>&copy; <a href="https://mason-leap-lab.github.io/">Mason Leap Lab 2020</a>. All Rights Reserved.</p>
+      <ul class="list-inline">
+        <li class="list-inline-item">
+          <a href="#">Privacy</a>
+        </li>
+        <li class="list-inline-item">
+          <a href="#">Terms</a>
+        </li>
+        <li class="list-inline-item">
+          <a href="#">FAQ</a>
+        </li>
+      </ul>
+    </div>
+  </footer>
+
+  <!-- Bootstrap core JavaScript -->
+  <script src="vendor/jquery/jquery.min.js"></script>
+  <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Plugin JavaScript -->
+  <script src="vendor/jquery-easing/jquery.easing.min.js"></script>
+
+  <!-- Custom scripts for this template -->
+  <script src="js/new-age.min.js"></script>
+
+</body>
+
+</html>
