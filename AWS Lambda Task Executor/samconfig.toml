@@ -1,0 +1,11 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "wukong-app"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-lkz2yioxdhj8"
+s3_prefix = "wukong-app"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+

@@ -1,6 +1,7 @@
 from toolz import identity, partial
 
-from utils import ignoring
+import random
+from contextlib import contextmanager
 
 compressions = {None: {"compress": identity, "decompress": identity}}
 
@@ -8,10 +9,44 @@ compressions[False] = compressions[None]  # alias
 
 default_compression = None
 
+@contextmanager
+def ignoring(*exceptions):
+   try:
+      yield
+   except exceptions as e:
+      pass   
+
+try:
+    import blosc
+
+    n = blosc.set_nthreads(2)
+    if hasattr("blosc", "releasegil"):
+        blosc.set_releasegil(True)
+except ImportError:
+    blosc = False
+
 with ignoring(ImportError):
    import zlib
 
    compressions["zlib"] = {"compress": zlib.compress, "decompress": zlib.decompress}
+
+def ensure_bytes(s):
+   """ Turn string or bytes to bytes
+
+   >>> ensure_bytes('123')
+   b'123'
+   >>> ensure_bytes(b'123')
+   b'123'
+   """
+   if isinstance(s, bytes):
+      return s
+   if isinstance(s, memoryview):
+      return s.tobytes()
+   if isinstance(s, bytearray) or PY2 and isinstance(s, buffer):  # noqa: F821
+      return bytes(s)
+   if hasattr(s, "encode"):
+      return s.encode()
+   raise TypeError("Object %s is neither a bytes object nor has an encode method" % s) 
 
 with ignoring(ImportError):
    import lz4
@@ -53,7 +88,27 @@ with ignoring(ImportError):
       "decompress": _fixed_lz4_decompress,
    }
    default_compression = "lz4"   
-   
+
+def byte_sample(b, size, n):
+    """ Sample a bytestring from many locations
+    Parameters
+    ----------
+    b: bytes or memoryview
+    size: int
+        size of each sample to collect
+    n: int
+        number of samples to collect
+    """
+    starts = [random.randint(0, len(b) - size) for j in range(n)]
+    ends = []
+    for i, start in enumerate(starts[:-1]):
+        ends.append(min(start + size, starts[i + 1]))
+    ends.append(starts[-1] + size)
+
+    parts = [b[start:end] for start, end in zip(starts, ends)]
+    return b"".join(map(ensure_bytes, parts))
+
+
 def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
    """
    Maybe compress payload

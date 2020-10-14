@@ -1,4 +1,6 @@
 from abc import ABCMeta, abstractmethod, abstractproperty
+from six import with_metaclass
+import weakref
 
 class Comm(with_metaclass(ABCMeta)):
    """

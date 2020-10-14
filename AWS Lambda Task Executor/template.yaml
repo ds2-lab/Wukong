@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  wukong-app
+
+  AWS SAM Template for Wukong.
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Layers:
+      - arn:aws:lambda:us-east-1:668099181075:layer:AWSLambda-Python37-SciPy1x:2
+      - arn:aws:lambda:us-east-1:561589293384:layer:DaskDependenciesAndXRay:6
+      - arn:aws:lambda:us-east-1:561589293384:layer:DaskLayer2:2
+      - arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9
+
+Resources:
+  WukongExectorTest:
+    Type: AWS::Serverless::Function 
+    Properties:
+      CodeUri: ./TaskExecutor/
+      Handler: function.lambda_handler
+      Runtime: python3.7
+      Description: Serverless Executor for Wukong.
+      MemorySize: 3008
+      Timeout: 200
+      Policies:
+        - arn:aws:iam::aws:policy/AWSLambdaFullAccess
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        #- arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+  WukongInvokerTest:
+    Type: AWS::Serverless::Function 
+    Properties:
+      CodeUri: ./Invoker/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.7
+      Description: Serverless distributed invoker for Wukong.
+      MemorySize: 512
+      Timeout: 90
+      Policies:
+        - arn:aws:iam::aws:policy/AWSLambdaFullAccess
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        #- arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+Outputs:
+  ExecutorFunctionName:
+    Description: The name of the AWS Lambda function created for the Wukong Executor.
+    Value: !Ref WukongExectorTest
+  InvokerFunctionName:
+    Description: The name of the AWS Lambda function created for the Wukong distributed invoker.
+    Value: !Ref WukongInvokerTest   

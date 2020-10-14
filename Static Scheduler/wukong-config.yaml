@@ -1,0 +1,21 @@
+# Configure the AWS Lambda resources used by Wukong.
+aws_lambda:
+  # If this is set to <true>, then the Static Scheduler will use the AWS API to retrieve the names of the AWS Lambda functions
+  # from CloudFormation. This should be done when AWS SAM was used to setup the AWS Lambda components for Wukong. 
+  # 
+  # If you manually created the AWS Lambda functions yourself, then you should set this to false and specify the names of the functions.
+  # Note that the user-specified names will be ignored when this is true.
+  retrieve_function_names_from_cloudformation: true 
+
+  # This is the name given to the AWS SAM application deployed for Wukong. This should be the same as the name used when deploying the
+  # AWS SAM application or the Static Scheduler will be unable to automatically retrieve the AWS Lambda function names.
+  # The default value of this property is the same as the default value for the AWS SAM application.
+  aws_sam_app_name: wukong-app
+
+  # The name of the AWS Lambda function used as the Wukong Executor. 
+  # This value is ignored if "retrieve_function_names_from_cloudformation" is set to true.
+  executor_function_name: WukongExecutor
+
+  # The name of the AWS Lambda function used as the Wukong Invoker. 
+  # This value is ignored if "retrieve_function_names_from_cloudformation" is set to true.
+  invoker_function_name: WukongInvoker

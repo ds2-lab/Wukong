@@ -21,7 +21,7 @@ from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
 
 from utils import nbytes, PY3, PY2
-from serialization import to_frames
+from serialization import to_frames, ensure_bytes
 
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core.async_context import AsyncContext

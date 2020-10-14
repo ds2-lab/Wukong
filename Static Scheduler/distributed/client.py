@@ -7,8 +7,10 @@ from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
 import copy
 import datetime
+import time as pythontime
 import hashlib
 from datetime import timedelta
+import traceback
 import errno
 from functools import partial
 from glob import glob
@@ -113,6 +115,7 @@ _global_client_index = [0]
 
 DEFAULT_EXTENSIONS = [PubSubClientExtension]
 
+REDIS_ADDRESS_KEY = "redis-address"
 
 def _get_global_client():
     L = sorted(list(_global_clients), reverse=True)
@@ -618,7 +621,7 @@ class Client(Node):
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
         self._timeout = timeout
-   
+        self.number_update_graph_calls = 0
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self.coroutines = []
@@ -708,8 +711,7 @@ class Client(Node):
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
-            "error": self._handle_error,
-            "redis-info": self._handle_redis_info
+            "error": self._handle_error
         }
 
         self._state_handlers = {
@@ -1061,7 +1063,9 @@ class Client(Node):
         assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
 
-        self._handle_redis_info(msg[0]["redis_endpoints"])
+        self.redis_address = msg[0][REDIS_ADDRESS_KEY]
+        self.dcp_redis = redis.StrictRedis(host = self.redis_address, port = 6379, db = 0)
+        #self._handle_redis_info(msg[0]["big_redis_endpoints"], msg[0]["small_redis_endpoints"])
 
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
@@ -1233,28 +1237,45 @@ class Client(Node):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
-    def _handle_redis_info(self, redis_endpoints):
-        print("Client received redis info from Scheduler.")
-        self.redis_endpoints = redis_endpoints
-        self.redis_nodes = dict()
-        self.redis_clients = []
-        # Populate the redis clients as well as the redis nodes for the hash ring.
-        for IP, port in self.redis_endpoints:
-            redis_client = redis.StrictRedis(host=IP, port = port, db = 0)
-            self.redis_clients.append(redis_client)
-            key_string = "node-" + str(IP) + ":" + str(port)
-            self.redis_nodes[key_string] = {
-                "hostname": key_string + ".FQDN",
-                "nodename": key_string,
-                "instance": redis_client,
-                "port": port,
-                "vnodes": 40
-            }
-        self.hash_ring = HashRing(self.redis_nodes)
-        #for port in self.redis_ports:
-        #    client = redis.StrictRedis(host=self.redis_endpoint, port = port, db = 0)      
-        #    self.redis_clients.append(client)
-        self.num_redis_clients = len(self.redis_clients)    
+    # def _handle_redis_info(self, big_redis_endpoints, small_redis_endpoints):
+    #     print("Client received redis info from Scheduler.")
+    #     self.big_redis_endpoints = big_redis_endpoints
+    #     self.small_redis_endpoints = small_redis_endpoints
+    #     self.big_redis_nodes = dict()
+    #     self.small_redis_nodes = dict()
+    #     self.big_redis_clients = []
+    #     self.small_redis_clients = []
+    #     # Populate the redis clients as well as the redis nodes for the hash ring.
+    #     for IP, port in self.big_redis_endpoints:
+    #         redis_client = redis.StrictRedis(host=IP, port = port, db = 0)
+    #         self.big_redis_clients.append(redis_client)
+    #         key_string = "node-" + str(IP) + ":" + str(port)
+    #         self.big_redis_nodes[key_string] = {
+    #             "hostname": key_string + ".FQDN",
+    #             "nodename": key_string,
+    #             "instance": redis_client,
+    #             "port": port,
+    #             "vnodes": 200
+    #         }
+
+    #     for IP, port in self.small_redis_endpoints:
+    #         redis_client = redis.StrictRedis(host=IP, port = port, db = 0)
+    #         self.small_redis_clients.append(redis_client)
+    #         key_string = "node-" + str(IP) + ":" + str(port)
+    #         self.small_redis_nodes[key_string] = {
+    #             "hostname": key_string + ".FQDN",
+    #             "nodename": key_string,
+    #             "instance": redis_client,
+    #             "port": port,
+    #             "vnodes": 200
+    #         }
+
+    #     self.big_hash_ring = HashRing(self.big_redis_nodes, hash_fn = "ketama")
+    #     self.small_hash_ring = HashRing(self.small_redis_nodes, hash_fn = "ketama")
+    #     #for port in self.redis_ports:
+    #     #    client = redis.StrictRedis(host=self.redis_endpoint, port = port, db = 0)      
+    #     #    self.redis_clients.append(client)
+    #     #self.num_redis_clients = len(self.redis_clients)    
 
     @gen.coroutine
     def _close(self, fast=False):
@@ -1721,7 +1742,7 @@ class Client(Node):
                 # print("Looked inside local worker...")
 
             # We now do an actual remote communication with workers or scheduler
-            # We could possibly just communicate directly with the Elasticache cluster here.
+            # We could possibly just communicate directly with the Redis cluster here.
             if self._gather_future:  # attach onto another pending gather request
                 self._gather_keys |= set(keys)
                 response = yield self._gather_future
@@ -1746,6 +1767,9 @@ class Client(Node):
                     len(response["keys"]),
                     response["keys"],
                 )
+                print("[ERROR - {}] Client failed togather {} keys from Redis...".format(datetime.datetime.utcnow(), len(response["keys"])))
+                for key in response["keys"]:
+                    print("\t{}".format(key))
                 for key in response["keys"]:
                     self._send_to_scheduler({"op": "report-key", "key": key})
                 for key in response["keys"]:
@@ -1753,6 +1777,9 @@ class Client(Node):
                         self.futures[key].reset()
                     except KeyError:  # TODO: verify that this is safe
                         pass
+                
+                # Sleep for a second.
+                yield gen.sleep(0.5)
             else:
                 break
 
@@ -1776,70 +1803,54 @@ class Client(Node):
         data = dict() 
 
         redis_key_lists = defaultdict(list)
+        
+        print("[{}] -- CLIENT -- Retrieving values for {} keys.".format(datetime.datetime.utcnow(), len(keys)))
 
-        # For each key, append it to the list associated with its client.
-        # We then call client.mget(list) for each of these lists to retrieve the results.
-        for key in keys:
-            client = self.hash_ring.get_node_instance(key)
-            redis_key_lists[client].append(key)
+        values = self.dcp_redis.mget(keys)
 
-        # Get the results and zip them with the keys so each key is paired with its associated value.
-        results = list()
-        for client, keys in redis_key_lists.items():
-            values = client.mget(keys)
-            values = zip(keys, values)
-            results.extend(values)
+        values = zip(keys, values)
 
-        # Attempt to deserialize the values we retrieved from Redis.
-        for key, value in results:
+        for key, value in values:
             if value is not None:
-                deserialized_value = cloudpickle.loads(value)
-                data[key] = deserialized_value
+                value_deserialized = cloudpickle.loads(value)
+                print("[CLIENT] Obtained value for key {} from Redis.".format(key))
+                data[key] = value_deserialized
             else:
-                addr = self.hash_ring.get_node_hostname(key)
-                print("[ERROR] Failed to retrieve value for task {} from Redis instance listening at addr {}".format(key, addr))
-                missing_keys.add(key)
-
-        #for key in keys:
-        #    hash_obj = hashlib.md5(key.encode())
-        #    val = int(hash_obj.hexdigest(), 16)
-        #    idx = val % self.num_redis_clients
-        #    redis_key_lists[idx].append(key)
-            #if val % 2 == 0:
-            #    keys1.append(key)
-            #else:
-            #    keys2.append(key)
-        
-        # Bulk "get" operation.
-        # results = [list() for client in self.redis_clients]
-
-        #for i in range(len(redis_key_lists)):
-        #    list_of_keys = redis_key_lists[i]
-        #    if len(list_of_keys) > 0:
-        #        redis_client = self.redis_clients[i]
-        #        results[i] = redis_client.mget(list_of_keys)
-
-        #results1 = []
-        #results2 = []
-        #if len(keys1) > 0:
-        #    results1 = self.redis_client1.mget(keys1)
-        #if len(keys2) > 0:
-        #    results2 = self.redis_client2.mget(keys2)
-        
-        #for i in range(len(redis_key_lists)):
-        #    list_of_keys = redis_key_lists[i]
-        #    list_of_results = results[i]
-        #    for j in range(len(list_of_results)):
-        #        res = list_of_results[j]
-        #        key = list_of_keys[j]
-        #        if res is None:
-        #            print("[ERROR] Redis Client #{} returned 'None' for key {}...".format(j, key))
-        #            missing_keys.add(key)
-        #        else:
-        #            value = cloudpickle.loads(res)
-        #            data[key] = value
+                print("[ERROR - {}] Failed to retrieve value for task {} from Redis instance listening at addr {}".format(datetime.datetime.utcnow(), key, self.redis_address))
+                value = self.dcp_redis.get(key)
+                if value is not None:
+                    value_deserialized = cloudpickle.loads(value)
+                    print("[CLIENT - WARNING {}] Obtained value {} for key {} from Redis on SECOND try.".format(datetime.datetime.utcnow(), value_deserialized, key))
+                    data[key] = value_deserialized
+                else:
+                    #traceback.print_stack(file=sys.stdout)
+                    missing_keys.add(key)
         
         # If missing_keys is non-empty, meaning there are missing keys, then construct the appropriate response. 
+        if missing_keys:
+            print("[{}] Client asking Scheduler for AWS Fargate information to get missing task data for keys {}".format(datetime.datetime.utcnow(), missing_keys))
+            response = yield self.scheduler.get_fargate_info_for_task(keys = list(missing_keys))
+            print("[{}] Client received response from Scheduler about AWS Fargate information.".format(datetime.datetime.utcnow()))
+
+            start = pythontime.time()
+            num_retrieved = 0
+            for key, fargate_task in response.items():
+                rc = redis.Redis(host = fargate_task["privateIpv4Address"], port = 6379)
+                value = rc.get(key)
+
+                if value is None:
+                    print("[ERROR] Failed to retrieve data from task {} from associated Fargate instance at {}:6379...".format(key, fargate_task["privateIpv4Address"]))
+                else:
+                    missing_keys.remove(key)
+                    num_retrieved += 1
+                    print("Client successfully retrieved data from task {} from associated Fargate instance at {}:6379.".format(key, fargate_task["privateIpv4Address"]))
+                    value_deserialized = cloudpickle.loads(value)
+                    data[key] = value_deserialized
+            stop = pythontime.time()
+            duration = stop - start 
+
+            print("Client spent {} seconds retrieving {} task data from various AWS Fargate nodes.".format(duration, num_retrieved))
+        
         if missing_keys:
             result["status"] = "error"
             result["keys"] = missing_keys
@@ -1847,6 +1858,9 @@ class Client(Node):
             result["status"] = "OK"
             result["data"] = data
         logger.debug("Gathered " + str(len(data)) + " data values from Redis.")
+
+        print("[CLIENT] Returning {} to the user...".format(str(result)))
+
         raise gen.Return(result)
         
     @gen.coroutine
@@ -2489,6 +2503,7 @@ class Client(Node):
         retries=None,
         fifo_timeout=0,
         actors=None,
+        persist=False
     ):
         
         with self._refcount_lock:
@@ -2560,6 +2575,10 @@ class Client(Node):
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk3}
             
+            #self.number_update_graph_calls += 1
+            #if dsk3 is not None:
+            #    dask.visualize(dsk3, filename = "update-graph-" + str(self.number_update_graph_calls), format = "svg")
+
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
@@ -2575,6 +2594,7 @@ class Client(Node):
                     "retries": retries,
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
+                    "persist": persist
                 }
             )
             return futures
@@ -2780,6 +2800,7 @@ class Client(Node):
         --------
         Client.get: Normal synchronous dask.get function
         """
+        print("[CLIENT] .compute() called...")
         if isinstance(collections, (list, tuple, set, frozenset)):
             singleton = False
         else:
@@ -2811,6 +2832,9 @@ class Client(Node):
         #restrictions, loose_restrictions = self.get_restrictions(
         #    collections, workers, allow_other_workers
         #)
+
+        restrictions = {}
+        loose_restrictions = []
 
         if not isinstance(priority, Number):
             priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
@@ -2922,10 +2946,13 @@ class Client(Node):
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
+        #restrictions, loose_restrictions = self.get_restrictions(
+        #    collections, workers, allow_other_workers
+        #)
+        
+        restrictions = {}
+        loose_restrictions = []
+        
         if not isinstance(priority, Number):
             priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
 
@@ -2939,6 +2966,7 @@ class Client(Node):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            persist = True
         )
 
         postpersists = [c.__dask_postpersist__() for c in collections]

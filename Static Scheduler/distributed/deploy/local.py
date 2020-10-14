@@ -15,6 +15,7 @@ from ..worker import Worker, parse_memory_limit, _ncores
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_NUM_FARGATE_NODES = 75
 
 class LocalCluster(SpecCluster):
     """ Create local Scheduler and Workers
@@ -65,13 +66,48 @@ class LocalCluster(SpecCluster):
         Network interface to use.  Defaults to lo/localhost
     worker_class: Worker
         Worker class used to instantiate workers from.
-    proxy_and_redis_address: str
-        The IP address of both the proxy and the Redis cluster(s)
+    proxy_address: str
+        The IPv4 address of the KV Store Proxy.
     proxy_port: int
-        The port of the proxy 
-    redis_ports: [int]
-        List of ports on which there are redis instances listening
-
+        The port on which the KV Store Proxy is listening.
+    num_lambda_invokers: int
+        The number of processes the Scheduler should create to invoke AWS Lambda functions in-parallel.
+    max_task_fanout: int
+        The threshold for the number of downstream tasks at or above which the proxy will be used for parallelizing invocations.
+    big_task_threshold: int
+        The threshold above which a task will be considered "big" in the context of using task collapsing/delay scheduling. 
+        The size of the task's output data is what is compared to the threshold. The units are bytes.
+    print_debug: bool
+        Toggles between printing more extensive debug information to the console (and not doing that).
+    reuse_existing_fargate_tasks_on_startup: bool
+        If there are already-running Fargate tasks in the ECS Cluster, should we attempt to use those
+        for our Storage Cluster? If True, then we will use them.
+    executors_use_task_queue: bool
+        Toggles between Task Executors performing "delay scheduling" and not.
+    ecs_cluster_name: str
+        The cluster name for the ECS Fargate Cluster that serves as Wukong's Storage Cluster.
+    use_bit_dep_checking: bool
+        Toggles between the two methods of dependency checking. To use the original way in which tasks
+        increment an integer counter, set 'use_bit_dep_checking' to False. To use the new, idempotent way in which
+        Executors are mapped to a bit and toggle this bit on, set this to True.
+    debug_mode: bool    
+        Enable a 'debug mode' in which the Scheduler prints a large amount of debug info and pauses at the end of each
+        call to update_graph. This does NOT print the same content as having 'print_debug' set to True.
+    ecs_task_definition: str
+        The ECS Task Definition to use for our Fargate Nodes.
+    ecs_network_configuration: dict
+        The network configuration parameter for the ECS Cluster.
+    num_chunks_for_large_tasks: int
+        How many chunks we should chunk large tasks into. Not currently used.
+    print_level: int (Should be 1, 2, or 3)
+        Modifies the verbosity of the debug output. Only has a visible effect of 'print_debug' is set to True. 1 is the most verbose, 3 is the least verbose.
+    aws_region: string
+        The AWS region in which all of the AWS components are running.
+    num_fargate_nodes: int
+        The number of Fargate nodes to use in the Storage Cluster.
+    reuse_lambdas: bool
+        Attempt to re-use existing Lambda functions between iterations of iterative workloads.
+    
     Examples
     --------
     >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
@@ -114,18 +150,45 @@ class LocalCluster(SpecCluster):
         worker_class=None,
         proxy_address = None,
         proxy_port = None,
-        redis_endpoints = [],
         num_lambda_invokers = 16,
         max_task_fanout = 10,
         chunk_large_tasks = False,
-        chunk_task_threshold = 50,
+        big_task_threshold = 50,
+        print_debug = False,
+        reuse_existing_fargate_tasks_on_startup = True, # If there are already some Fargate tasks appropriately tagged/grouped and already running, should we just use those?
+        executors_use_task_queue = True,                # Large tasks don't write data; instead, they wait for the tasks to become ready to execute locally.
+        ecs_cluster_name = 'WukongFargateStorage',
+        use_bit_dep_checking = False,
+        debug_mode = False,
+        lambda_debug = False,
+        use_fargate = True,
+        ecs_task_definition = 'WukongRedisNode:1',
+                ecs_network_configuration = {
+                            'awsvpcConfiguration': {
+                                'subnets': ['subnet-0df77d3c433e46fd0',
+                                            'subnet-0d169f20d4fdf90a7',
+                                            'subnet-075f20e7075f1be7d',
+                                            'subnet-033375027137f61bd',
+                                            'subnet-06cac58c4a8abdeec',
+                                            'subnet-04e6391f47afa1492',
+                                            'subnet-02e033f99a669e161',
+                                            'subnet-0cc89d0da8726e056',
+                                            'subnet-00789d1dc555dafa2'], 
+                                'securityGroups': [ 'sg-0f4ea153447b2c910' ], 
+                                'assignPublicIp': 'ENABLED' } },     
         num_chunks_for_large_tasks = None,
+        print_level = 1, # Possible: {1, 2, 3}
+        aws_region = 'us-east-1',
+        reuse_lambdas = False,
+        num_fargate_nodes = DEFAULT_NUM_FARGATE_NODES,
+        use_invoker_lambdas_threshold = 10000,
+        force_use_invoker_lambdas = False,        
         **worker_kwargs
     ):
         if ip is not None:
             warnings.warn("The ip keyword has been moved to host")
             host = ip
-
+        
         if diagnostics_port is not None:
             warnings.warn(
                 "diagnostics_port has been deprecated. "
@@ -193,12 +256,27 @@ class LocalCluster(SpecCluster):
                 blocked_handlers=blocked_handlers,
                 proxy_address = proxy_address,
                 proxy_port = proxy_port,
-                redis_endpoints = redis_endpoints, 
                 num_lambda_invokers = num_lambda_invokers,
                 chunk_large_tasks = chunk_large_tasks,
-                chunk_task_threshold = chunk_task_threshold,
+                big_task_threshold = big_task_threshold,
                 max_task_fanout = max_task_fanout,
-                num_chunks_for_large_tasks = num_chunks_for_large_tasks
+                num_chunks_for_large_tasks = num_chunks_for_large_tasks,
+                aws_region = aws_region,
+                num_fargate_nodes = num_fargate_nodes,
+                ecs_cluster_name = ecs_cluster_name,
+                ecs_task_definition = ecs_task_definition,
+                ecs_network_configuration = ecs_network_configuration,                
+                print_debug = print_debug,
+                use_bit_dep_checking = use_bit_dep_checking,
+                print_level = print_level, # Possible: {1, 2, 3}
+                executors_use_task_queue = executors_use_task_queue,
+                debug_mode = debug_mode,
+                lambda_debug = lambda_debug,
+                reuse_lambdas = reuse_lambdas,
+                use_fargate = use_fargate,
+                reuse_existing_fargate_tasks_on_startup = reuse_existing_fargate_tasks_on_startup, # If there are already some Fargate tasks appropriately tagged/grouped and already running, should we just use those?
+                use_invoker_lambdas_threshold = use_invoker_lambdas_threshold,
+                force_use_invoker_lambdas = force_use_invoker_lambdas                      
             ),
         }
 

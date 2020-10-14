@@ -7,6 +7,7 @@ from functools import partial
 import itertools
 import traceback
 import json
+import ujson 
 import logging
 from numbers import Number
 import operator
@@ -17,7 +18,9 @@ import six
 import uuid
 import sys
 import hashlib
+import string
 import socket
+import numpy as np
 
 import redis 
 from uhashring import HashRing 
@@ -25,6 +28,7 @@ from uhashring import HashRing
 import weakref
 import cloudpickle
 import base64 
+import yaml
 import boto3
 
 import psutil
@@ -50,7 +54,7 @@ import dask
 import sys, os
 sys.path.insert(0, os.path.abspath('..'))
 from pathing import Path, PathNode
-from lambdag_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown
+from wukong_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown
 
 from .protocol import dumps
 from .comm.utils import from_frames
@@ -98,8 +102,67 @@ from .variable import VariableExtension
 
 logger = logging.getLogger(__name__)
 
-lambda_client = boto3.client('lambda', region_name='us-east-1')
 ENCODING = 'utf-8' 
+
+# Used when mapping PathNode --> Fargate Task with a dictionary. These are the keys.
+FARGATE_ARN_KEY = "taskARN"
+FARGATE_ENI_ID_KEY = "eniID"
+FARGATE_PUBLIC_IP_KEY = "publicIP"
+FARGATE_PRIVATE_IP_KEY = "privateIpv4Address"
+
+ECS_SERVICE_NAME = "WukongStorageService"
+# If the task was created by the Wukong service, then its group will be the prefix "service:" with the name of the service.
+# The 'group' property is used to organize the Fargate tasks.
+# Additionally, the Proxy can just query ECS for all of the tasks in this group; it doesn't need to be explicitly passed
+# the IP addresses for Fargate nodes or anything like that. It can discover the Redis Fargate nodes automatically via this metadata.
+FARGATE_TASK_GROUP = "service:" + ECS_SERVICE_NAME
+
+# Doesn't really do anything right now. It's added to the service we create for Fargate, but we don't do anything with it.
+FARGATE_TASK_TAG = "Wukong"
+
+# Keys for Fargate metrics.
+FARGATE_NUM_SELECTED = "NumSelected"
+
+# The maximum number of tasks ECS will allow us to launch.
+MAX_FARGATE_TASKS = 250
+
+# Default number of Fargate nodes to use.
+DEFAULT_NUM_FARGATE_NODES = 25
+
+# This string is appended to the end of task keys to get the Redis key for the associated task's dependency counter. 
+DEPENDENCY_COUNTER_SUFFIX = "---dep-counter"
+
+# This string is appended to the end of task keys (that are located at the start of a Path/static schedule) to get the Redis key for the associated Path object. 
+PATH_KEY_SUFFIX = "---path"
+
+ITERATION_COUNTER_SUFFIX = "---iteration"
+
+# Appended to the end of a task key to store fargate node metadata in Redis.
+FARGATE_DATA_SUFFIX = "---fargate"
+
+# Leaf Task Lambdas will subscribe to a Redis Pub/Sub channel prefixed by this. The suffix will be the corresponding leaf task key.
+#leaf_task_channel_prefix = "__keyspace@0__:"
+
+# Keys used for the 'op' field in messages from AWS Lambda functions.
+EXECUTED_TASK_KEY = "executed-task"
+TASK_ERRED_KEY = "task-erred"
+EXECUTING_TASK_KEY = "executing-task"
+LAMBDA_RESULT_KEY = "lambda-result"
+
+# Used to tell Task Executors whether or not to use the Task Queue (large objects wait for tasks to become ready instead of writing data).
+EXECUTOR_TASK_QUEUE_KEY = "executors-use-task-queue"
+
+DATA_SIZE = "data-size"
+
+# Keys associated with the storage of Lambda execution metrics in Redis.
+TASK_BREAKDOWNS = "task_breakdowns"
+LAMBDA_DURATIONS = "lambda_durations"
+
+# Key used to send Redis address to Client objects.
+REDIS_ADDRESS_KEY = "redis-address"
+
+# Key used in dictionary sent to Lambdas (the dictionary contains information from Path objects).
+TASK_TO_FARGATE_MAPPING = "tasks-to-fargate-mapping"
 
 # Create a list to store the channel names.
 redis_channel_names = []
@@ -108,7 +171,10 @@ redis_channel_name_prefix = "dask-workers-"
 # The Lambdas are only using one channel now that the Scheduler only gets final results. The channel is hard-coded.
 redis_channel_names.append(redis_channel_name_prefix + "1")
 
-dis_channel_names.append(redis_channel_name_prefix + str(i))
+# print("There are {} cores available so we will have {} redis channels.".format(num_cores, num_channels))
+# Create the channel names based on the number of cores available. 
+# for i in range(0, num_channels):
+#     redis_channel_names.append(redis_channel_name_prefix + str(i))
                         
 ALLOWED_FAILURES = dask.config.get("distributed.scheduler.allowed-failures")
 
@@ -858,6 +924,7 @@ class Scheduler(ServerNode):
     default_port = 8786
     _instances = weakref.WeakSet()
 
+    # Scheduler __init__()
     def __init__(
         self,
         loop=None,
@@ -879,17 +946,60 @@ class Scheduler(ServerNode):
         dashboard_address=None,
         proxy_address = None,
         proxy_port = None,
-        redis_endpoints = [],
         num_lambda_invokers = 16,
-        max_task_fanout = 10,                  # The threshold for when a node will use the proxy to parallelize downstream task invocations.
-        chunk_large_tasks = False,             # Flag indicating whether or not Lambda functions should break up large tasks and store them in chunks.
-        chunk_task_threshold = 50,             # The threshold, in bytes, above which an object should be broken up into chunks when stored.
-        num_chunks_for_large_tasks = None,      # We break up large objects into "this" many chunks. 
-                                               # If this is 'None', then we break large objects up such that
-                                               # each chunk is size 'chunk_task_threshold'.
+        aws_region = 'us-east-1',
+        reuse_lambdas = False,
+        print_debug = False, # Print debug information
+        print_level = 1, # Possible: {1, 2, 3}. Lower is more in-depth.
+        reuse_existing_fargate_tasks_on_startup = True, # If there are already some Fargate tasks appropriately tagged/grouped and already running, should we just use those?
+        executors_use_task_queue = True,                # Large tasks don't write data; instead, they wait for the tasks to become ready to execute locally.
+        use_bit_dep_checking = False,                   # If True, use bit-method of dependency counters.
+        debug_mode = False,    # When enabled, the user will step through each call to update_graph, and a significantly larger amount of debug info will print each iteration.
+        lambda_debug = False,
+        use_fargate = True,
+        ecs_cluster_name = 'WukongFargateStorage',
+        ecs_task_definition = 'WukongRedisNode:1',
+        ecs_network_configuration = {
+            'awsvpcConfiguration': {
+                'subnets': ['subnet-0d6d83219a53e4e72'],
+                'securityGroups': ['sg-0316757e47d10fce8'],
+                'assignPublicIp': 'ENABLED' } },
+        # ecs_network_configuration = {
+        #                     'awsvpcConfiguration': {
+        #                         'subnets': ['subnet-0df77d3c433e46fd0',
+        #                                     'subnet-0d169f20d4fdf90a7',
+        #                                     'subnet-075f20e7075f1be7d',
+        #                                     'subnet-033375027137f61bd',
+        #                                     'subnet-06cac58c4a8abdeec',
+        #                                     'subnet-04e6391f47afa1492',
+        #                                     'subnet-02e033f99a669e161',
+        #                                     'subnet-0cc89d0da8726e056',
+        #                                     'subnet-00789d1dc555dafa2'], 
+        #                         'securityGroups': [ 'sg-0f4ea153447b2c910' ], 
+        #                         'assignPublicIp': 'ENABLED' } },         
+        num_fargate_nodes = DEFAULT_NUM_FARGATE_NODES, # The maximum number of Fargate tasks that can be started. Caps out at 250 for FARGATE_SPOT and 100 for FARGATE.
+        max_task_fanout = 10,                          # The threshold for when a node will use the proxy to parallelize downstream task invocations.
+        chunk_large_tasks = False,                     # Flag indicating whether or not Lambda functions should break up large tasks and store them in chunks.
+        big_task_threshold = 200_000_000,              # The threshold, in bytes, above which an object should be broken up into chunks when stored.
+        num_chunks_for_large_tasks = None,             # We break up large objects into "this" many chunks. 
+                                                       # If this is 'None', then we break large objects up such that
+                                                       # each chunk is size 'big_task_threshold'.
+        use_invoker_lambdas_threshold = 10000,
+        force_use_invoker_lambdas = False,        
         **kwargs
     ):
         self._setup_logging()
+        self.proxy_address = proxy_address or ""    # Address of the redis proxy (should be same as redis, right?)
+
+        # Max value for 'num_fargate_nodes' is 250. Min value is 1. 
+        # If > 250 given, 'num_fargate_nodes' clamped to 250.
+        # If < 1 given, 'num_fargate_nodes' set to 100.
+        if (num_fargate_nodes > 250):
+            print("[WARNING] The value given for 'num_fargate_nodes' ({}) is too high. Clamping to 250.".format(num_fargate_nodes))
+            num_fargate_nodes = 250
+        elif (num_fargate_nodes < 1):
+            print("[WARNING] The value given for 'num_fargate_nodes' ({}) is too low. Using default of 100.".format(num_fargate_nodes))
+            num_fargate_nodes = 100
 
         # Attributes
         self.allowed_failures = allowed_failures
@@ -1112,27 +1222,10 @@ class Scheduler(ServerNode):
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
             "lambda-result": self.result_from_lambda,
+            "get_fargate_info_for_task": self.get_fargate_info_for_task,
             "task-erred-lambda": self.handle_task_erred_lambda,
             "debug-msg": self.handle_debug_message2
         }
-
-        # self._transitions = {
-            # ("released", "waiting"): self.transition_released_waiting,
-            # ("waiting", "released"): self.transition_waiting_released,
-            # ("waiting", "processing"): self.transition_waiting_processing,
-            # ("waiting", "memory"): self.transition_waiting_memory,
-            # ("processing", "released"): self.transition_processing_released,
-            # ("processing", "memory"): self.transition_processing_memory,
-            # ("processing", "erred"): self.transition_processing_erred,
-            # ("no-worker", "released"): self.transition_no_worker_released,
-            # ("no-worker", "waiting"): self.transition_no_worker_waiting,
-            # ("released", "forgotten"): self.transition_released_forgotten,
-            # ("memory", "forgotten"): self.transition_memory_forgotten,
-            # ("erred", "forgotten"): self.transition_released_forgotten,
-            # ("erred", "released"): self.transition_erred_released,
-            # ("memory", "released"): self.transition_memory_released,
-            # ("released", "erred"): self.transition_released_erred,
-        # }
         
         # New _transitions dict that uses the Lambda-aware versions of the transition functions.
         self._transitions = {
@@ -1174,35 +1267,53 @@ class Scheduler(ServerNode):
         )
 
         self.num_lambda_invokers = num_lambda_invokers
+        
+        # Map from task-key --> bool where a value of True indicates that the task has finished execution.
+        # Only used during debugging.
+        self.completed_tasks = defaultdict(bool)
+        
+        # Count how many times a given task has been completed by AWS Lambda (i.e., how many times we got a notification saying it was completed).
+        self.completed_task_counts = defaultdict(int)
 
-        self.redis_endpoints = redis_endpoints
-        self.redis_clients = []
-        self.redis_nodes = dict()
+        # Map from task-key --> bool where a value of True indicates that the task has begun execution on a Lambda.
+        # Only used during debugging.
+        self.executing_tasks = defaultdict(bool)
 
-        counter = 1
-        # Populate the redis clients as well as the redis nodes for the hash ring.
-        for IP, port in self.redis_endpoints:
-            redis_client = redis.StrictRedis(host=IP, port = port, db = 0)
-            self.redis_clients.append(redis_client)
-            key_string = "node-" + str(IP) + ":" + str(port)
-            self.redis_nodes[key_string] = {
-                "hostname": key_string + ".FQDN",
-                "nodename": key_string,
-                "instance": redis_client,
-                "port": port,
-                "vnodes": 40
-            }
-        self.hash_ring = HashRing(self.redis_nodes)
-        # For each port, create a redis client and store a connection to it.
-        #for port in self.redis_ports:
-        #    print("[ {} ] Attempting to connect to Redis server {} of {} at {}:{}...".format(datetime.datetime.utcnow(), counter, len(self.redis_ports), self.redis_endpoint, port))
-        #    redis_client = redis.StrictRedis(host = self.redis_endpoint, port = port, db = 0)
-        #    print("[ {} ] Successfully connected to Redis Server #{}".format(datetime.datetime.utcnow(), counter))
-        #    self.redis_clients.append(redis_client)
-        #    counter = counter + 1
+        # Count how many times a given task started executing on AWS Lambda (i.e., how many times we got a notification saying it was starting execution).
+        self.executing_tasks_counters = defaultdict(int)
 
-        self.num_redis_clients = len(self.redis_clients)
+        # Contains the start time, end time, and duration of execution of completed tasks (when lambda_debug is enabled).
+        self.completed_task_data = dict()
 
+        self.path_nodes = dict()
+        self.task_payloads = dict()
+
+        # Sometimes Tasks are re-used. In these cases, we put their old payloads and PathNode objects here for safe-keeping.
+        self.old_path_nodes = defaultdict(list)
+        self.old_task_payloads = defaultdict(list)
+
+        self.lambda_debug = lambda_debug
+
+        # Redis instance for storing dependency counters and paths.
+        self.dcp_redis = redis.StrictRedis(host = proxy_address, port = 6379, db = 0)
+        self.dcp_pubsub = self.dcp_redis.pubsub()
+
+        self.use_invoker_lambdas_threshold = use_invoker_lambdas_threshold
+        self.force_use_invoker_lambdas = force_use_invoker_lambdas
+
+        # Track info such as how many times each Fargate node has been selected.
+        self.fargate_metrics = dict()
+
+        self.aws_region = aws_region
+        self.lambda_client = boto3.client('lambda', region_name=self.aws_region)
+        self.ecs_client = boto3.client('ecs', region_name = self.aws_region)
+        self.ec2_client = boto3.client('ec2', region_name = self.aws_region)
+        self.ecs_cluster_name = ecs_cluster_name
+        self.ecs_task_definition = ecs_task_definition
+        self.ecs_network_configuration = ecs_network_configuration
+        self.reuse_lambdas = reuse_lambdas              # Re-use Lambdas between iterations of iterative workloads.
+        self.workload_fargate_tasks = defaultdict(list) # For each workload, keep a list of the Fargate tasks created so that they may be closed when we're done.
+        self.num_fargate_nodes = num_fargate_nodes
         # List of timedelta objects representing the difference in time between when a Lambda invocation sent a message to the scheduler
         # and then the scheduler actually received the message.
         self.timedeltas_from_lambda = []                # times that lambda sent msg to when scheduler got it, i think
@@ -1215,20 +1326,79 @@ class Scheduler(ServerNode):
         #self.poll_redis = PeriodicCallback(self.poll_redis_channel, callback_time = 50, io_loop = loop)
         self.poll_redis = PeriodicCallback(self.consume_redis_queue, callback_time = 5, io_loop = loop)
         self.task_execution_lengths = dict()        
+        self.use_fargate = use_fargate              # If True, use Fargate cluster for Storage. Otherwise, use single Redis instance (DCP Redis).
         self.redis_channel_index = 0                # used to tell lambdas which redis pub-sub channel to use
         self.start_end_times = dict()               # start and end times for tasks
         self.debug_print = False                    # controls certain prints
         self.periodic_callbacks["poll-redis"] = self.poll_redis
         self.sum_lambda_lengths = 0                 # running sum of values in lambda_lengths 
         self.lambda_lengths = []                    # execution lengths of lambdas (ENTIRE lambdas, not just the tasks right?)
-        self.proxy_address = proxy_address or ""    # Address of the redis proxy (should be same as redis, right?)
         self.proxy_port = proxy_port            # Port of the Redix proxy
         self.num_zero_processed = 0             # number of times a call to consume_redis_queue resulted in the processing of zero messages.
         self.max_task_fanout = max_task_fanout  # If a task has this many or more downstream tasks, it will use Redis proxy to invoke them.
         self.proxy_comm = None
-        self.chunk_task_threshold = chunk_task_threshold     # The threshold, in bytes, above which an object should be broken up into chunks when stored.
+        self.big_task_threshold = big_task_threshold     # The threshold, in bytes, above which an object should be broken up into chunks when stored.
         self.chunk_large_tasks = chunk_large_tasks # Flag indicating whether or not Lambda functions should break up large tasks and store them in chunks.
         self.num_chunks_for_large_tasks = num_chunks_for_large_tasks
+        self.print_debug = print_debug  # Print debug info to console?
+        self.print_level = print_level  # Level of debugging
+        self.reuse_existing_fargate_tasks_on_startup = reuse_existing_fargate_tasks_on_startup # Reuse existing, already-running Fargate tasks when possible (instead of creating new ones).
+        self.last_job_tasks = list()                # List of task keys/payloads for the last-submitted job.
+        self.last_job_counter = 0                   # How many tasks from last_job_tasks have finished executing.
+        self.tasks_to_fargate_nodes = dict()        # Mapping of TaskID --> FargateNode
+        self.use_bit_dep_checking = use_bit_dep_checking            # If True, use bit-method of dep counters. If False, use traditional way (incrementing integers).
+        self.executors_use_task_queue = executors_use_task_queue, # Large tasks don't write data; instead, they wait for the tasks to become ready to execute locally.
+        self.scheduler_id = str(random.randint(0, 9999)) + random.choice(string.ascii_letters).upper() # Unique ID so we can distinguish between Lambdas from different Scheduler's and whatnot.
+        
+        # We keep track of all the leaf tasks that we've seen in this dictionary. Specifically, this is a mapping from TASK_KEY (str) --> {True, False}. 
+        self.seen_leaf_tasks = dict()
+
+        # If we're printing something like a piece of data that could conceivably be 1,000's of characters, we'll probably want to truncate the string representation
+        # of it unless we want to flood the console. This is the point at which we truncate. If it is a negative number, then we don't truncate it.
+        self.print_debug_max_chars = 100    
+        
+        # When enabled, the user will step through each call to update_graph, and a significantly larger amount of debug info will print each iteration.
+        # Useful for K-Means and other Dask-ML workloads in which there are multiple, successive (and automatic) calls to update_graph() in which the results
+        # of one job/workload are used in the next.
+        self.debug_mode = debug_mode 
+        self.num_tasks_processed = 0 # Sum of the lengths of the tasks parameter in update_graph()
+        self.executed_tasks = [] 
+        self.executed_tasks_old = dict()
+        self.number_update_graph_calls = 0
+
+        with open("./wukong-config.yaml") as f:
+            self.wukong_config = yaml.load(f, Loader = yaml.FullLoader) 
+            self.aws_config = self.wukong_config["aws_lambda"]
+        
+        resolve_via_cloudformation = self.aws_config["retrieve_function_names_from_cloudformation"]
+
+        # Check if we're supposed to retrieve the function names via cloud formation.
+        if resolve_via_cloudformation:
+            aws_sam_app_name = self.aws_config["aws_sam_app_name"]
+            print("Retrieving AWS Lambda function names from CloudFormation. AWS SAM app name: \"{}\"".format(aws_sam_app_name))
+            cloudformation_client = boto3.client('cloudformation', region_name = self.aws_region)
+
+            stacks_response = cloudformation_client.describe_stacks(StackName = aws_sam_app_name)
+            stack_outputs = stacks_response["Stacks"][0]["Outputs"]
+            
+            # stack_outputs is a list so we iterate over it and extract the desired information.
+            # There should only be two entries, each of which is one that we want.
+            for stack_output in stack_outputs:
+                if stack_output["OutputKey"] == "ExecutorFunctionName":
+                    self.executor_function_name = stack_output["OutputValue"]
+                elif stack_output["OutputKey"] == "InvokerFunctionName":
+                    self.invoker_function_name = stack_output["OutputValue"]
+
+            print("Executor Function Name: \"{}\"".format(self.executor_function_name))
+            print("Invoker Function Name: \"{}\"".format(self.invoker_function_name))            
+        else:
+            self.executor_function_name = self.aws_config["executor_function_name"]
+            self.invoker_function_name = self.aws_config["invoker_function_name"]
+
+            print("AWS Lambda function names specified directly in configuration file.")
+            print("Executor Function Name: \"{}\"".format(self.executor_function_name))
+            print("Invoker Function Name: \"{}\"".format(self.invoker_function_name))
+
         if self.worker_ttl:
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl, io_loop=loop)
             self.periodic_callbacks["worker-ttl"] = pc
@@ -1353,14 +1523,23 @@ class Scheduler(ServerNode):
 
             finalize(self, del_scheduler_file)
             
-        self.batched_lambda_invoker = BatchedLambdaInvoker(interval = "2ms", chunk_size = 2, num_invokers = self.num_lambda_invokers, redis_channel_names = redis_channel_names, loop = self.loop)
-        self.batched_lambda_invoker.start(lambda_client, scheduler_address = self.address)        
+        self.batched_lambda_invoker = BatchedLambdaInvoker(interval = "2ms", 
+                                                           chunk_size = 2, 
+                                                           num_invokers = self.num_lambda_invokers, 
+                                                           redis_channel_names = redis_channel_names, 
+                                                           loop = self.loop,
+                                                           redis_address = self.proxy_address,
+                                                           aws_region = self.aws_region,
+                                                           executor_function_name = self.executor_function_name,
+                                                           invoker_function_name = self.invoker_function_name,
+                                                           use_invoker_lambdas_threshold = self.use_invoker_lambdas_threshold,
+                                                           force_use_invoker_lambdas = self.force_use_invoker_lambdas)
+        self.batched_lambda_invoker.start(self.lambda_client, scheduler_address = self.address)        
         # Write the address to Elasticache so the Lambda function can access it without being told explicitly.
         address_key = "scheduler-address"
         logger.info("Writing value %s to key %s in Redis" % (self.address , address_key))
         print("Writing value {} to key {} in Redis...".format(self.address, address_key))
-        for redis_client in self.redis_clients:
-            redis_client.set(address_key, self.address)
+        self.dcp_redis.set(address_key, self.address)          
         print("Done.")
 
         # Create a list to keep track of the processes as well as the Queue object, which we use for communication between the processes.
@@ -1371,7 +1550,7 @@ class Scheduler(ServerNode):
         print("Creating {} redis-polling processes.".format(len(redis_channel_names)))
         # For each channel, we create a process and store a reference to it in our list.
         for channel_name in redis_channel_names:
-            redis_polling_process = Process(target = self.poll_redis_process, args = (self.redis_polling_queue, channel_name, self.redis_endpoints[0]))
+            redis_polling_process = Process(target = self.poll_redis_process, args = (self.redis_polling_queue, channel_name, self.proxy_address))
             redis_polling_process.daemon = True 
             self.redis_polling_processes.append(redis_polling_process)
 
@@ -1383,14 +1562,16 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
         
-        payload_for_proxy = {"op": "start", "redis-channel-names": redis_channel_names, "scheduler-address": self.address}
+        #payload_for_proxy = {"op": "start", "redis-channel-names": redis_channel_names, "scheduler-address": self.address}
 
-        self.loop.add_callback(self.send_message_to_proxy, payload = payload_for_proxy, start_handling = True)
+        #self.loop.add_callback(self.send_message_to_proxy, payload = payload_for_proxy, start_handling = True)
 
         #scheduler_conn, poller_conn = multiprocessing.Pipe()
         #self.scheduler_conn = scheduler_conn
         #sqs_polling = multiprocessing.Process(target = sqs_polling_process, args = (queue_url, poller_conn, 2))
         
+        print("-=-=-=-=-=-=-=- SCHEDULER ID: {} -=-=-=-=-=-=-=-".format(self.scheduler_id))
+
         return self.finished()
 
     def __await__(self):
@@ -1464,8 +1645,6 @@ class Scheduler(ServerNode):
         self.status = "closed"
         self.stop()
         yield super(Scheduler, self).close()
-
-        redis_channel.unsubscribe()
         
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
@@ -1555,8 +1734,8 @@ class Scheduler(ServerNode):
         retries=None,
         user_priority=0,
         actors=None,
-        fifo_timeout=0,
-        print_debug = False
+        persist=False,
+        fifo_timeout=0
     ):
         """
         Add new computations to the internal dask graph
@@ -1566,15 +1745,52 @@ class Scheduler(ServerNode):
         start = time()
         fifo_timeout = parse_timedelta(fifo_timeout)
         keys = set(keys)
+        update_graph_id = str(random.randint(0, 9999)) + random.choice(string.ascii_letters).upper() + random.choice(string.ascii_letters).upper()
+        self.number_update_graph_calls += 1
+        print("\n=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=")
+        print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= [SCHEDULER] update_graph() #{} --- ID: {} (Scheduler ID is {}) =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=".format(self.number_update_graph_calls, update_graph_id, self.scheduler_id))
+        print("=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=\n")
+
+        if self.print_debug and persist:
+            print("=== This is a persist operation! ===")
+
+        if self.debug_mode:
+            print("\tlen(tasks) = {}, len(keys) = {}".format(len(tasks), len(keys)))
+            self.num_tasks_processed += len(tasks)
+            print("\tNumber of tasks processed: {}\n".format(self.num_tasks_processed))
+
         if len(tasks) > 1:
             self.log_event(
                 ["all", client], {"action": "update_graph", "count": len(tasks)}
             )
+        
+        fargate_launcher = None 
+        manager = multiprocessing.Manager()
+        fargate_tasks = manager.list()
 
+        if self.use_fargate:        
+            # Check if we need to launch or remove Fargate tasks.
+            if (len(self.workload_fargate_tasks['current']) > self.num_fargate_nodes):
+                # Add all of the Fargate tasks we currently know about to fargate_tasks
+                fargate_tasks.extend(self.workload_fargate_tasks['current'])
+                fargate_launcher = Process(target = self.launch_fargate_nodes, args = [self.num_fargate_nodes, fargate_tasks], kwargs = {"max_retries": 10})
+                fargate_launcher.start()
+            elif  (len(self.workload_fargate_tasks['current']) < self.num_fargate_nodes):
+                self.workload_fargate_tasks['current'].clear()
+                # Add all of the Fargate tasks we currently know about to fargate_tasks
+                fargate_launcher = Process(target = self.launch_fargate_nodes, args = [self.num_fargate_nodes, fargate_tasks], kwargs = {"max_retries": 10})
+                fargate_launcher.start()
+        
         # Remove aliases
         for k in list(tasks):
             if tasks[k] is k:
                 del tasks[k]
+
+        if self.print_debug and self.print_level <= 1:
+            print("\nNew Tasks: ")
+            for key in list(tasks):
+                print(key)
+            print("\n\n")
 
         dependencies = dependencies or {}
 
@@ -1586,6 +1802,7 @@ class Scheduler(ServerNode):
                     dep not in self.tasks and dep not in tasks for dep in deps
                 ):  # bad key
                     logger.info("User asked for computation on lost data, %s", k)
+                    print("[WARNING] User asked for computation on lost data, {}.".format(k))
                     del tasks[k]
                     del dependencies[k]
                     if k in keys:
@@ -1616,18 +1833,21 @@ class Scheduler(ServerNode):
                 try:
                     deps = dependencies[key]
                 except KeyError:
-                    deps = self.dependencies[key]
+                    #deps = self.dependencies[key]
+                    deps = dependencies[key]
                 for dep in deps:
                     if dep in dependents:
                         child_deps = dependents[dep]
                     else:
-                        child_deps = self.dependencies[dep]
+                        #child_deps = self.dependencies[dep]
+                        child_deps = dependencies[dep]
                     if all(d in done for d in child_deps):
                         if dep in self.tasks:
                             done.add(dep)
                             stack.append(dep)
 
             for d in done:
+                #print("Task {} is already done (in-memory).".format(d))
                 tasks.pop(d, None)
                 dependencies.pop(d, None)
 
@@ -1662,6 +1882,7 @@ class Scheduler(ServerNode):
                 dts = self.tasks[dep]
                 ts.dependencies.add(dts)
                 dts.dependents.add(ts)
+            #print("\nDependencies for task {}:\n\t{}".format(key, ts.dependencies))
 
         # Compute priorities
         if isinstance(user_priority, Number):
@@ -1697,6 +1918,25 @@ class Scheduler(ServerNode):
 
         # Ensure all runnables have a priority
         runnables = [ts for ts in touched_tasks if ts.run_spec]
+
+        if self.debug_mode:
+            executing_again = []
+            print("\n\n-=-=-=-=-=-=- Runnables (len = {}) -=-=-=-=-=-=-\n".format(len(runnables)))
+            for ts in runnables:
+                print("{} -- {}".format(ts.key, ts.state))
+                if ts.key in self.completed_tasks:
+                    executing_again.append(ts)
+                if ts.priority is None and ts.run_spec:
+                    ts.priority = (self.generation, 0)
+            print("\n-=-=-=-=-=-=- End of Runnables -=-=-=-=-=-=-\n\n")
+            
+            print("\n\n-=-=-=-=-=-=- Executing {} tasks again (not necessarily for the second time) -=-=-=-=-=-=-\n".format(len(executing_again)))
+            for ts in executing_again:
+                num_executed_so_far = self.completed_task_counts[ts.key]
+                print("Potentially executing task {} for time #{}".format(ts.key, (num_executed_so_far+1)))
+            print("\n-=-=-=-=-=-=- End of executing again -=-=-=-=-=-=-\n\n")
+
+        # runnables_dict  = {ts.key:ts for ts in runnables} # Used when populating mapping for dependencies --> bit position
         for ts in runnables:
             if ts.priority is None and ts.run_spec:
                 ts.priority = (self.generation, 0)
@@ -1720,18 +1960,18 @@ class Scheduler(ServerNode):
                 ts.retries = v
 
         # Compute recommendations
-        recommendations = OrderedDict()
+        waiting = []
 
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
             if ts.state == "released" and ts.run_spec:
-                recommendations[ts.key] = "waiting"
+                waiting.append(ts)
 
-        for ts in touched_tasks:
-            for dts in ts.dependencies:
-                if dts.exception_blame:
-                    ts.exception_blame = dts.exception_blame
-                    recommendations[ts.key] = "erred"
-                    break
+        # for ts in touched_tasks:
+        #     for dts in ts.dependencies:
+        #         if dts.exception_blame:
+        #             ts.exception_blame = dts.exception_blame
+        #            recommendations[ts.key] = "erred"
+        #           break
 
         for plugin in self.plugins[:]:
             try:
@@ -1748,9 +1988,17 @@ class Scheduler(ServerNode):
                 )
             except Exception as e:
                 logger.exception(e)
+        
+        if self.debug_mode:
+            print("\n\n-=-=-=-=-=-=- Tasks executed since last call to update_graph ({} tasks were executed) -=-=-=-=-=-=-\n".format(len(self.executed_tasks)))
+            self.executed_tasks.sort()
+            for task_key in self.executed_tasks:
+                print(task_key)
+            print("\n-=-=-=-=-=-=- End of tasks executed since last call to update_graph -=-=-=-=-=-=-\n\n")
 
-        # These are the leaf-node tasks within the DAG. They can be invoked immediately.
-        immediately_invocable_task_payloads = []
+            self.executed_tasks_old[self.number_update_graph_calls] = self.executed_tasks.copy()
+            self.executed_tasks = []
+
         # These are what is serialized and stored on Redis. They are dictionaries containing the following information for each Task:
         # - Scheduler's IP Address 
         # - Serialized Code (or location of serialized code)
@@ -1764,12 +2012,12 @@ class Scheduler(ServerNode):
 
         # We pass this to mset for one big initial payload.
         initial_payloads = defaultdict(dict)
-        # Provide initial values.
-        #for client in self.redis_clients:
-        #    initial_payloads.append(dict())
 
         # List of sizes of all tasks. This is so we can attempt to compute the average size of tasks. 
         task_sizes = []
+        
+        # Same as above but for paths.
+        path_sizes = []
 
         # These are submitted to Lambda functions for execution.
         paths = []
@@ -1778,7 +2026,7 @@ class Scheduler(ServerNode):
         max_path_size_bytes = 256000
 
         # These are the tasks with ZERO dependencies. They'll be found at the bottom of the tree.
-        leaf_tasks = []
+        leaf_tasks = dict()
 
         tasks_to_path_nodes = defaultdict(dict)           # Mapping a task to its path node(s)
         tasks_to_path_starts = dict()                     # Map of task_key --> starting_node_of_path
@@ -1791,13 +2039,89 @@ class Scheduler(ServerNode):
         largest_fanout = 0
         largest_fanout_task_key = ""
 
-        # Collect all leaf tasks.
-        for task_key, ts in self.tasks.items():
-            if len(ts.dependencies) == 0 and (ts.state == "released" or ts.state == "waiting" or ts.state == "no-worker"):
-                # print("Adding task {} to leaf tasks. Task state: {}".format(task_key, ts.state))
-                leaf_tasks.append((task_key, ts))
+        self.last_job_counter = 0
+        self.last_job_tasks.clear() 
+        
+        #print("\nTasks contained in parameter Tasks:")
+        #for tsk in tasks:
+        #    print(tsk)
+        
+        #print("\nTasks contained in runnables:")
+        #for tsk in runnables:
+        #    print(tsk)
+        
+        #print("\nTasks contained in touched_tasks:")
+        #for tsk in touched_tasks:
+        #    print(tsk)
+        
+        if self.print_debug or self.debug_mode:
+            print("len(tasks): {}\nlen(runnables): {}\nlen(touched_tasks): {}\nlen(self.tasks): {}".format(len(tasks), len(runnables), len(touched_tasks), len(self.tasks)))
 
-        def DFS(current_task, current_path, current_path_size, visited, isNewPath = False):
+        # Collect all leaf tasks.
+        #for task_key, ts in self.tasks.items():
+        for ts in runnables:
+            if ts.run_spec and (ts.state == "released" or ts.state == "waiting"):
+                task_key = ts.key
+                #if self.print_debug and self.print_level <= 1:
+                #    print("Checking if task {} is a leaf task...".format(task_key))
+            #     # Leaf tasks are tasks with no dependencies -- they can be executed right away. We only want tasks that are in a state which indicates they have
+            #     # not yet been executed. We also check that we have no explicit record of executing the task in the completed_tasks dictionary.
+            #     if self.completed_tasks[task_key] == False:
+            #         # First, the task shouldn't be one that is already processing or in-memory.
+            #         if ts.state == "released" or ts.state == "waiting" or ts.state == "no-worker":
+            #             # Next, it should either have no dependencies...
+                if len(ts.dependencies) == 0:
+                    if self.print_debug and self.print_level <= 3:
+                        print("\tAdding task {} to leaf tasks. Task state: {}\n".format(task_key, ts.state))
+                    leaf_tasks[task_key] = ts
+                else:
+                    # It is possible that we'll have a task dependent only on tasks that have already been executed. In that case, we can invoke 
+                    # the task as all of its data is theoretically available (unless the databases have been wiped since then).
+                    # 
+                    # TODO: Keep track of user-triggered DB wipes and keep track of which data is erased so we know when we'd have to recompute it.
+                    deps = list(ts.dependencies)
+                    add_to_leaf_tasks = True 
+                    
+                    # Basically, we check and see if all the dependencies are ones that we have already. If not, then we won't be invoking the task with the leaf wave.
+                    for dep in deps:
+                        if self.print_debug and self.print_level <= 1:
+                            print("\tProcessing dep of {}: {}".format(task_key, dep.key))
+                        #if self.completed_tasks[dep.key] == False:
+                        if dep.key not in self.tasks or dep.state != "memory":
+                            if self.print_debug and self.print_level <= 1:
+                                print("\t\tDependency {} of task {} has not been completed yet...\n".format(dep.key, task_key))
+                            add_to_leaf_tasks = False 
+                            break 
+                    
+                    if add_to_leaf_tasks:
+                        if self.print_debug and self.print_level <= 3:
+                            print("\tAdding task {} to leaf tasks. NOTE: It actually has {} dependencies, but we have their data already.\n".format(task_key, len(list(ts.dependencies))))
+                        leaf_tasks[task_key] = ts
+                    #else:
+                    #    if self.print_debug:
+                    #        print("\t[WARNING] Task {} has already been completed...?".format(task_key))
+
+        if self.debug_mode or (self.print_debug and self.print_level <= 2):
+            print("num_leaf_tasks =", len(leaf_tasks))
+            if len(leaf_tasks) == 0 and not self.debug_mode:
+                for ts in runnables:
+                    print("{} -- State: {}\nDependencies:".format(ts.key, ts.state))
+                    for dep in list(ts.dependencies):
+                        print("\t{} -- State: {}".format(dep.key, dep.state))
+                        print("\tPreviously a Leaf Task: {}\n".format(self.seen_leaf_tasks.get(dep.key, False)))
+        
+        sum_tasks = 0
+        for k,c in self.completed_task_counts.items():
+            sum_tasks = sum_tasks + c
+        
+        if self.debug_mode or (self.print_debug and self.print_level <= 2):
+            print("num_leaf_tasks =", len(leaf_tasks))        
+            print("Number of tasks executed so far:", sum_tasks)
+            print("[SCHEDULER] update-graph() done.")
+            if self.debug_mode:
+                input("\n-=-=-=-=-=-=- Type something and then enter to continue... -=-=-=-=-=-=-\n\n")
+
+        def DFS(current_task, current_path, current_path_size, visited, isNewPath = False, incrDepCounter = False):
             """ Depth-first search. This method is used to construct paths through 
                 the DAG. These paths are then sent to AWS Lambda functions for execution.
 
@@ -1842,10 +2166,17 @@ class Scheduler(ServerNode):
 
                 Args:
                     current_task (TaskState): The current TaskState being processed from the DAG.
+
                     current_path (Path):      The current Path being constructed.
+
                     current_path_size (int):  The size in bytes of all of the task payloads in the current path.
+
                     visited (Dict):           A map of task keys (str) --> bool indicating which tasks have already 
                                               been visited by the DFS.
+                    
+                    isNewPath (bool):         Indicates whether the current_path var is newly-created or not (i.e., the current path node is first on the path)
+                    
+                    incrDepCounter (bool):    In some cases, some data may already be computed. So initial dependency counters may need to be incremented instead of set to zero.
                 Returns:
                     This returns the 'node' processed during the invocation of the method."""
             nonlocal largest_fanout
@@ -1853,17 +2184,62 @@ class Scheduler(ServerNode):
 
             visited[current_task.key] = True
 
-            if print_debug:
-                print("[DFS] Visiting task ", current_task.key)
-                print_me = [c.__str__() for c in current_task.who_wants]
-                print("\tClients who want this task: ", print_me)
+            # We may have already executed this task in a previous job.
+            already_executed = False #(current_task.key in self.tasks and current_task.state == "memory")
+
+            if self.print_debug and self.print_level <= 1:
+                if already_executed:
+                    print("[DFS] Visiting already-executed task", current_task.key)
+                else:
+                    print("[DFS] Visiting task", current_task.key)
+                #print_me = [c.__str__() for c in current_task.who_wants]
+                #print("\tClients who want this task: ", print_me)
 
             # Construct a task payload with the task key and task state.
-            payload = self.construct_basic_task_payload(current_task.key, current_task)
+            payload = self.construct_basic_task_payload(current_task.key, current_task, already_executed = already_executed, persist = persist)
+
+            #if current_task.key in self.task_payloads:
+                #print("\n[WARNING] Task {} already has an existing Task Payload...".format(current_task.key))
+
+            #    old_task_payload = self.task_payloads[current_task.key]
+            #    self.old_task_payloads[current_task.key].append(old_task_payload)
+
+                # completed = self.completed_tasks[current_task.key]
+                # executing = self.executing_tasks[current_task.key]
+                # if completed:
+                #     print("\tTask {} HAS already been executed!")
+                # elif executing:
+                #     print("\tTask {} is EXECUTING right now...")
+                #     #pythontime.sleep(5)
+                # else:
+                #     print("\tTask {} has NOT been completed, NOR has it been executed...\n")
+                #     #pythontime.sleep(5)
             
+            dep_index_map = dict()
+
+            if self.use_bit_dep_checking and len(current_task.dependents) > 0:
+                for dts in list(current_task.dependents):
+                    # Get the index of the current task's key in each of its downstream task's dependency lists.
+                    idx = -1
+                    dep_list = list(dts.dependencies)
+
+                    # Search for the current task's key in the list of dependencies (each element is a TaskState object).
+                    for i in range(0, len(dep_list)):
+                        ts = dep_list[i]
+                        if ts.key == current_task.key:
+                            idx = i
+                            break
+                    
+                    # Make sure we definitely found it. If we don't, something is wrong...
+                    if idx == -1:
+                        raise ValueError("Never found current_task.key ({}) in downstream task's dependencies (dts is {})".format(current_task.key, dts.key))
+                    
+                    dep_index_map[dts.key] = idx
+
             # Put the payload in the "master list (dict)" of task payloads. 
             # Presently we don't do anything with this master list though...
             task_payloads[current_task.key] = payload
+            self.task_payloads[current_task.key] = payload 
 
             # Serialize the entire payload using Dask serialization.
             serialized_payload = list(dumps(payload))
@@ -1874,15 +2250,74 @@ class Scheduler(ServerNode):
 
             current_payload_size = sys.getsizeof(payload_bytes)
             serialized_tasks[current_task.key] = payload_bytes
+            task_sizes.append(current_payload_size)
+
+            if self.print_debug and self.print_level <= 1:
+                print("Size of serialized task payload for task {}: {} bytes".format(current_task.key, current_payload_size))
             
+            fargate_task_for_node = None
+
+            if self.use_fargate:
+                # If we're re-using a task from a previous computation, then we've already 
+                # mapped its data somewhere. We would like to reuse the data/mapping.
+                if current_task.key not in self.tasks_to_fargate_nodes:
+                    # (Pseudo-)randomly select a Fargate task to map to the current PathNode (which we're about to create).
+                    fargate_task_for_node = random.choice(self.workload_fargate_tasks['current'])
+                else:
+                    if self.print_debug and self.print_level <= 1:
+                        print("\n\tReusing existing Fargate mapping for task {}".format(current_task.key))
+                    # Re-use previous mapping.
+                    fargate_task_for_node = self.tasks_to_fargate_nodes[current_task.key]
+            
+                # Increment our internal record of how many times we've selected this Fargate node in a workload.
+                fargate_task_ARN = fargate_task_for_node[FARGATE_ARN_KEY]
+                self.fargate_metrics[fargate_task_ARN][FARGATE_NUM_SELECTED] += 1
+
+                # Store the mapping.
+                self.tasks_to_fargate_nodes[current_task.key] = fargate_task_for_node
+                current_path.tasks_to_fargate_nodes[current_task.key] = fargate_task_for_node
+
             # Create new path node.
-            current_path_node = PathNode(payload_bytes, payload["key"], current_path, None, None)
+            current_path_node = PathNode(payload_bytes, 
+                                         payload["key"], 
+                                         current_path, 
+                                         None, 
+                                         None, 
+                                         fargate_task_for_node, 
+                                         scheduler_id = self.scheduler_id, 
+                                         update_graph_id = update_graph_id, 
+                                         dep_index_map = dep_index_map,
+                                         starts_at = None) # Value for starts_at will be updated later...
+            
+            # We're gonna store this PathNode in Redis.
+            # initial_payloads[self.dcp_redis][current_task.key] = current_path_node
+
+            #if current_task.key in self.path_nodes:
+            #    old_path_node = self.path_nodes[current_task.key]
+            #    self.old_path_nodes[current_task.key].append(old_path_node)
+                #print("\n[WARNING] Task {} already has an existing PathNode...".format(current_task.key))
+                # print("\n\n[WARNING] Task {} already has an existing Task Payload...".format(current_task.key))
+                # completed = self.completed_tasks[current_task.key]
+                # executing = self.executing_tasks[current_task.key]
+                # if completed:
+                #     print("\tTask {} HAS already been executed!")
+                # elif executing:
+                #     print("\tTask {} is EXECUTING right now...")
+                #     #pythontime.sleep(5)
+                # else:
+                #     print("\tTask {} has NOT been completed, NOR has it been executed...\n")                
+                #     #pythontime.sleep(5)
+
+            # Record the PathNode in our local dictionary of TASK_KEY --> PathNode.
+            self.path_nodes[current_task.key] = current_path_node
+
+            self.last_job_tasks.append((current_path_node, payload))
 
             tasks_to_path_nodes[current_task.key][current_path.id] = current_path_node
             
             # If this is a brand new path, then the current node is the first of the path so add it to the dictionary.
             if isNewPath:
-                if print_debug:
+                if self.print_debug and self.print_level <= 1:
                     print("[NEW PATH] Task {} is the first node in a new path.".format(current_task.key))
                 tasks_to_path_starts[current_task.key] = current_path
 
@@ -1893,24 +2328,37 @@ class Scheduler(ServerNode):
             current_path_size += current_payload_size 
             
             # If this task has dependencies, then we need to store payload/path and dependency counters in Redis.
-            if len(current_task.dependencies) > 0:
-                redis_dep_counter_key = str(ts.key) + "---dep-counter"
+            #if len(current_task.dependencies) > 0:
+
+            if self.use_bit_dep_checking == False:
+                # Create dependency counters for all tasks, not just non-leaf tasks (even though non-leaf tasks don't need dependency counters). 
+                # Just doing it for consistency's sake.
+                redis_dep_counter_key = str(current_task.key) + DEPENDENCY_COUNTER_SUFFIX
+                if self.print_debug and self.print_level <= 1:
+                    print("Will be storing dependency counter for task {} at key {}".format(current_task.key, redis_dep_counter_key))
                 
-                # Store the payload and the dependency counters for this task state.
-                # hash_obj = hashlib.md5(ts.key.encode())
-                # val = int(hash_obj.hexdigest(), 16)
-                # dict_index = val % self.num_redis_clients
-                # initial_payloads[dict_index][redis_dep_counter_key] = 0
-                associated_redis_client = self.hash_ring.get_node_instance(ts.key)
-                initial_payloads[associated_redis_client][redis_dep_counter_key] = 0
-                #if val % 2 == 0:
-                #    initial_redis_payload1[redis_dep_counter_key] = 0
-                #else:
-                #    initial_redis_payload2[redis_dep_counter_key] = 0
+                initial_dep_value = 0
+
+                # Look at each dependency. If it is in memory, then increment the counter.
+                for dts in current_task.dependencies:
+                    if dts.key in self.tasks and self.tasks[dts.key].state == "memory":
+                        initial_dep_value += 1
+
+                        if self.print_debug and self.use_fargate:
+                            # Make sure we include the task-to-fargate mapping for the dependency so the current task can find it.
+                            current_path.tasks_to_fargate_nodes[dts.key] = self.tasks_to_fargate_nodes[dts.key]
+                            print("Dependency {} of task {} is in memory!".format(dts.key, current_task.key))
+                            print("\tIncrementing initial dependency counter value for task {}. (Was {}, is now {}.)".format(
+                                current_task.key, (initial_dep_value - 1), initial_dep_value))
+                    else:
+                        if self.print_debug:
+                            print("Dependency {} of task {} is in state {}. Cannot consider it done.".format(dts.key, current_task.key, self.tasks[dts.key].state))
+
+                initial_payloads[self.dcp_redis][redis_dep_counter_key] = initial_dep_value
 
             # If there are no downstream tasks from this node, then just pass.
             if payload["num-dependencies-of-dependents"] == 0:
-                if print_debug:
+                if self.print_debug and self.print_level <= 1:
                     print("[DEPENDENTS] Task {} has no dependents. Path ended.".format(current_task.key))
                 pass
             else:
@@ -1922,11 +2370,14 @@ class Scheduler(ServerNode):
                 # The reason for this is that only one outgoing edge from the current node may be included
                 # on the same path. Additional outgoing edges will require their own paths.
                 # next_unvisited_node_should_go_on_new_path = False
-
+                if self.print_debug and self.print_level <= 1:
+                    print("[DEPENDENTS] Task {} has {} dependents.".format(current_task.key, len(dependents)))
                 # Iterate over the remaining dependents.
                 for i in range(0, len(dependents)):
                     dependent_task_state = dependents[i]
                     key = dependent_task_state.key
+                    if self.print_debug and self.print_level <= 1:
+                        print("\t[DEPENDENTS] Looking at dependent {}...".format(key))
                     # Check if we've already visited the dependent node. If we have,
                     # then that means that at some point in a previous DFS, we touched this node.
                     if visited.get(key, False) == True:
@@ -1935,12 +2386,21 @@ class Scheduler(ServerNode):
                         existing_path = tasks_to_path_starts.get(key, None)
                         # If the past is not none, then a path was already created at this node. Just use that path.
                         if existing_path is not None:
-                            if print_debug:
-                                print("[PATH-V] Dependent task {} is already the start of an existing path.".format(key))
+                            if self.print_debug and self.print_level <= 1:
+                                print("\t\t[PATH-V] Dependent task {} is already the start of an existing path.".format(key))
                             
                             # Grab the start of the existing path (which should be the dependent task)
                             # and add that to the invoke list of the current path node. That's all we need to do.
                             dependent_task_path_node = existing_path.get_start()
+
+                            if self.use_fargate:
+                                # Make sure we have all of the Fargate IPs for dependencies of the downstream node in our task mapping.
+                                dependent_task_payload = task_payloads[dependent_task_path_node.task_key]                                
+                                for dependency_key in dependent_task_payload["dependencies"]:
+                                    # If we've cached a mapping in our global TASK-KEY --> FARGATE IP mapping AND said mapping does not exist
+                                    # in the current path's task-fargate mapping, then add it to the current path's task-fargate mapping.
+                                    if dependency_key in self.tasks_to_fargate_nodes and dependency_key not in current_path.tasks_to_fargate_nodes:
+                                        current_path.tasks_to_fargate_nodes[dependency_key] = self.tasks_to_fargate_nodes[dependency_key]  
 
                             # If the current node does not yet have a 'become' field, then we will have the current node
                             # 'become' the dependent node. We will  add the dependent node's path to the current path.
@@ -1948,12 +2408,21 @@ class Scheduler(ServerNode):
                                 # Add the contents of the new path to this path.
                                 current_path.tasks.extend(existing_path.tasks)
 
+                                if self.use_fargate:
+                                    # Update our Task --> FargateNode mapping.
+                                    current_path.tasks_to_fargate_nodes.update(existing_path.tasks_to_fargate_nodes)
+
+                                    # Make sure the mapping for THIS task is in the next path's Fargate mapping since it may need
+                                    # to retrieve the current task's data. That is, the current task is a data dependency for whatever task
+                                    # starts the next path, so the next path needs to know where the current task's data will be located.
+                                    existing_path.tasks_to_fargate_nodes[current_path_node.task_key] = current_path_node.fargate_node
+
                                 # Since we added the existing path to the current path, any paths that start where the existing path ended
                                 # should be added to the current path's "next_paths" field.
                                 for path in existing_path.next_paths:
                                     current_path.add_next_path(path)
 
-                                current_path_node.become = dependent_task_path_node.task_key 
+                                current_path_node.become = dependent_task_path_node.task_key                               
                             else:
                                 # If the current node already has a 'become', then we have to invoke the dependent node being processed.
                                 # Update the path information for the current path and the path of the dependent node. Then add the 
@@ -1961,15 +2430,24 @@ class Scheduler(ServerNode):
                                 existing_path.add_previous_path(current_path)
                                 current_path.add_next_path(existing_path)
                                 current_path_node.invoke.append(dependent_task_path_node.task_key)
+
+                                if self.use_fargate:
+                                    # Make sure the mapping for THIS task is in the next path's Fargate mapping since it may need
+                                    # to retrieve the current task's data. That is, the current task is a data dependency for whatever task
+                                    # starts the next path, so the next path needs to know where the current task's data will be located.
+                                    existing_path.tasks_to_fargate_nodes[current_path_node.task_key] = current_path_node.fargate_node      
+
+                                    # Add the existing downstream task's Fargate information to the current path's mapping.
+                                    current_path.tasks_to_fargate_nodes[dependent_task_path_node.task_key] = dependent_task_path_node.fargate_node                                                          
                         else:
-                            if print_debug:
-                                print("[PATH-V] Dependent task {} exists on some path. Using sub-path created from existing path.".format(key))
-                            # We're basically going to fabricate a new path that starts at the dependent node
+                            if self.print_debug and self.print_level <= 1:
+                                print("\t\t[PATH-V] Dependent task {} exists on some path. Using sub-path created from existing path.".format(key))
+                            # We're basically going to create a new path that starts at the dependent node
                             # using the dependent node's existing path. We're just going to discard everything
                             # that came before it.
 
                             # Get the existing path node of the dependent task.
-                            dependent_task_path_node = next(iter(tasks_to_path_nodes[key].values())) #tasks_to_path_nodes[key][current_path.id]
+                            dependent_task_path_node = next(iter(tasks_to_path_nodes[key].values())) # Grab the first path from the dictionary...
                             # TODO: We may want to pick a specific path as opposed to arbitrarily picking the original path (which
                             # is stored at position zero). For example, we may want to use the longest path. Or maybe even the shortest.
 
@@ -1979,12 +2457,31 @@ class Scheduler(ServerNode):
                             # Get the index of the dependent task/path node in its existing path.
                             idx = dependent_task_original_path.tasks.index(dependent_task_path_node)
 
+                            if self.use_fargate:
+                                # Add the existing downstream task's Fargate information to the current path's mapping.
+                                current_path.tasks_to_fargate_nodes[dependent_task_path_node.task_key] = dependent_task_path_node.fargate_node 
+
+                                # Make sure we have all of the Fargate IPs for dependencies of the downstream node in our task mapping.
+                                dependent_task_payload = task_payloads[dependent_task_path_node.task_key]                               
+                                for dependency_key in dependent_task_payload["dependencies"]:
+                                    # If we've cached a mapping in our global TASK-KEY --> FARGATE IP mapping AND said mapping does not exist
+                                    # in the current path's task-fargate mapping, then add it to the current path's task-fargate mapping.
+                                    if dependency_key in self.tasks_to_fargate_nodes and dependency_key not in current_path.tasks_to_fargate_nodes:
+                                        current_path.tasks_to_fargate_nodes[dependency_key] = self.tasks_to_fargate_nodes[dependency_key]   
+
+                            # If we currently lack a 'become' node, then we'll just add this next path to ourselves.
                             if current_path_node.become is None:
                                 current_path.tasks.extend(dependent_task_original_path.tasks[idx:])
                                 current_path_node.become = dependent_task_path_node.task_key
+
+                                if self.use_fargate:
+                                    # Also make sure the mapping for THIS task is in the next path's Fargate mapping since it may need
+                                    # to retrieve the current task's data. That is, the current task is a data dependency for whatever task
+                                    # starts the next path, so the next path needs to know where the current task's data will be located.
+                                    dependent_task_original_path.tasks_to_fargate_nodes[current_path_node.task_key] = current_path_node.fargate_node                            
                             else:
                                 # Create a new path.
-                                new_path = Path(None, None, None, None)
+                                new_path = Path(None, None, None, None, None)
                                 new_path.add_previous_path(current_path)
                                 current_path.add_next_path(new_path)
 
@@ -1997,23 +2494,39 @@ class Scheduler(ServerNode):
                                 # The dependent task is now the start of a new path, so update its entry in tasks_to_path_starts.
                                 tasks_to_path_starts[dependent_task_path_node.get_task_key()] = new_path
                                 
+                                if self.use_fargate:
+                                    # Add the current path node's fargate node to the new path's mapping. The new path may need to
+                                    # retrieve the data of the current path node from Redis, so it needs the IP address of where the data is stored.
+                                    new_path.tasks_to_fargate_nodes[current_path_node.task_key] = current_path_node.fargate_node
+                                
                                 current_path_node.invoke.append(dependent_task_path_node.task_key)
                     # If we have NOT visited the node yet, then we will DFS from that node with a brand new path.
                     else:
                         # If this is the first out-going edge, we will arbitarily 'become' this node and invoke the others.
                         if current_path_node.become is None:
-                            dependent_task_path_node = DFS(dependent_task_state, current_path, current_path_size, visited, isNewPath = False)
-                            if print_debug:
-                                print("[PATH] Staying on same path for dependent task {}.\n\tTask {} will BECOME task {}.".format(key, current_path_node.get_task_key(), key))
+                            dependent_task_path_node = DFS(dependent_task_state, current_path, current_path_size, visited, isNewPath = False, incrDepCounter = already_executed)
+                            if self.print_debug and self.print_level <= 1:
+                                print("\t\t[PATH] Staying on same path for dependent task {}.\n\tTask {} will BECOME task {}.".format(key, current_path_node.get_task_key(), key))
                             current_path_node.become = dependent_task_path_node.task_key 
                         else:
-                            if print_debug:
-                                print("[PATH] Creating new path for dependent task {}.\n\tTask {} will INVOKE task {}.".format(key, current_path_node.get_task_key(), key))
+                            if self.print_debug and self.print_level <= 1:
+                                print("\n\n\t\t[PATH] Creating new path for dependent task {}.\n\tTask {} will INVOKE task {}.".format(key, current_path_node.get_task_key(), key))
                             # Create a new path. We will invoke the dependent task and it will continue down this new path.
-                            new_path = Path(None, None, None, None)
+                            new_path = Path(None, None, None, None, None)
+
+                            # Link the new path and current path together.
                             current_path.add_next_path(new_path)
                             new_path.add_previous_path(current_path)
-                            dependent_task_path_node = DFS(dependent_task_state, new_path, 0, visited, isNewPath = True)
+
+                            if self.use_fargate:
+                                # Add the current node's Fargate mapping info to the new Path (since it may need 
+                                # it given the first node of the new path has the current node as a dependency).
+                                new_path.tasks_to_fargate_nodes[current_path_node.task_key] = current_path_node.fargate_node
+
+                            # Continue DFS.
+                            dependent_task_path_node = DFS(dependent_task_state, new_path, 0, visited, isNewPath = True, incrDepCounter = already_executed)
+
+                            # Update the invoke list for the current node with the new PathNode returned from the DFS.
                             current_path_node.invoke.append(dependent_task_path_node.task_key)
                             
                             # Update the master list of paths.
@@ -2023,23 +2536,49 @@ class Scheduler(ServerNode):
             # Serialize this node. This check is redundant/unnecessary?
             if current_task.key not in tasks_to_serialized_path_node:
                 # Temporarily remove the Path reference before we serialize as we don't want to serialize the path reference.
+                current_path_node.starts_at = current_path.get_start().task_key
                 current_path_node.path = None 
                 node_serialized = cloudpickle.dumps(current_path_node)
                 tasks_to_serialized_path_node[current_task.key] = node_serialized
                 current_path_node.path = current_path
             return current_path_node
         
+        # If we created a process to launch Fargate tasks, then we need to wait for it to finish before we begin invoking Lambdas.
+        if self.use_fargate and fargate_launcher is not None:
+            print("[ {} ] Scheduler is waiting for FARGATE LAUNCHER progress to finish...".format(datetime.datetime.utcnow()))
+            fargate_launcher.join()
+            print("[ {} ] Fargate-launching process has finished.".format(datetime.datetime.utcnow()))
+            #print("fargate_tasks:", fargate_tasks)
+            for fargate_task in fargate_tasks:
+                #print("Is fargate_task {} in self.workload_fargate_tasks['current']?".format(fargate_task))
+                if not fargate_task in self.workload_fargate_tasks['current']:
+                    #print("It is not! Adding it now.")
+                    self.workload_fargate_tasks['current'].append(fargate_task)
+                taskArn = fargate_task[FARGATE_ARN_KEY]
+                if taskArn not in self.fargate_metrics:
+                    #print("Creating entry in fargate_metrics for Fargate task {}.".format(taskArn))
+                    self.fargate_metrics[taskArn] = {
+                        FARGATE_NUM_SELECTED: 0
+                    }
+            #self.workload_fargate_tasks['current'].extend(fargate_tasks)
+            
+            #for _task in tasks_removed:
+            #    self.workload_fargate_tasks['current'].remove(_task)
+            
         visited = dict()
+        metrics = dict()
+        DFS_start = pythontime.time()
+
         # Construct "paths" by performing depth-first searches from leaves.
-        for leaf_task_key, leaf_task_state in leaf_tasks:
+        for leaf_task_key, leaf_task_state in leaf_tasks.items():
             # If the task is processing already, then do not do anything.
-            if leaf_task_state.state == "processing":
-                if print_debug:
-                    print("[ {} Scheduler - PREP: Skipping task {} because it is already processing.".format(datetime.datetime.utcnow(), leaf_task_key))
-                continue
+            #if leaf_task_state.state == "processing":
+            #    if self.print_debug:
+            #        print("[ {} Scheduler - PREP: Skipping task {} because it is already processing.".format(datetime.datetime.utcnow(), leaf_task_key))
+            #    continue
 
             current_path_size = 0
-            new_path = Path(None, None, None, None)
+            new_path = Path([], {}, [], [], {})
 
             paths.append(new_path)
 
@@ -2048,107 +2587,250 @@ class Scheduler(ServerNode):
             # Note that we pass 'isNewPath = False' since the path is NOT empty; it has the leaf task already.
             # Empty paths are only created during "fan-out" situations from a node. The tasks that get invoked
             # from the node with the fan-out are put on new paths.
-            if print_debug:
+            if self.print_debug and self.print_level <= 2:
                 print("[ {} ] - Performing DFS for leaf task {}.".format(datetime.datetime.utcnow(), leaf_task_key))
-            DFS(leaf_task_state, new_path, current_path_size, visited, isNewPath = False)
+            DFS(leaf_task_state, new_path, current_path_size, visited, isNewPath = False, incrDepCounter = False)
         
+        DFS_end = pythontime.time()
+        
+        DFS_length = DFS_end - DFS_start
+
+        metrics["DFS"] = DFS_length
+
         # Debug. Print the paths.
-        if print_debug:
+        if self.print_debug and self.print_level <= 1:
             counter = 0
             for path in paths:
                 print("\n\nPath #", counter)
-                counter = counter + 1
                 for task in path.tasks:
-                    print(task)
+                    # The task payload is mostly just serialized gibberish here.
+                    task_str = task.to_string_no_task_payload()
+                    if self.print_debug_max_chars > 0:
+                        task_str = task_str[0:self.print_debug_max_chars] + "..."
+                    print(task_str)
+                if self.use_fargate:
+                    print("\nPath #{} Tasks-to-Fargate-Nodes Map:".format(counter))
+                    for task_key, map in path.tasks_to_fargate_nodes.items():
+                        print("\t{} --> {}".format(task_key, str(map)))
+                counter = counter + 1
 
         print("\n[ {} ] Number of Paths created: {}.".format(datetime.datetime.utcnow(), len(paths)))
 
-        if print_debug:
+        if self.print_debug and self.print_level <= 3:
             print("Serializing path starts...")
+
+        _serialization_start = pythontime.time()
 
         # Serialize all of the paths and store them in Redis.
         serialized_paths = {}
+        path_counter = 1
+        encoded_nodes = {}
         for task_key, path in tasks_to_path_starts.items():
             nodes = {}
             starting_node_key = path.get_start().task_key
+
             # Store each node in the dictionary under its associated task key. We encode the bytes-form of the nodes so we can send it to Lambda (can't send bytes directly).
             for node in path.tasks:
-                nodes[node.task_key] = base64.encodestring(tasks_to_serialized_path_node[node.task_key]).decode(ENCODING)
-                for invoke_node in node.invoke:
-                    nodes[invoke_node] = base64.encodestring(tasks_to_serialized_path_node[invoke_node]).decode(ENCODING)
-            payload = {"nodes-map": nodes, "starting-node-key": starting_node_key}
-            serialized_payload = json.dumps(payload)
+                if node.task_key in encoded_nodes:
+                    nodes[node.task_key] = encoded_nodes[node.task_key]
+                else:
+                    encoded = base64.encodestring(tasks_to_serialized_path_node[node.task_key]).decode(ENCODING)
+                    nodes[node.task_key] = encoded
+                    encoded_nodes[node.task_key] = encoded
+                for invoke_node_key in node.invoke:
+                    if invoke_node_key in encoded_nodes:
+                        nodes[invoke_node_key] = encoded_nodes[invoke_node_key]
+                    else:
+                        encoded = base64.encodestring(tasks_to_serialized_path_node[invoke_node_key]).decode(ENCODING)
+                        nodes[invoke_node_key] = encoded
+                        encoded_nodes[invoke_node_key] = encoded                    
+            if type(self.executors_use_task_queue) is tuple:
+                self.executors_use_task_queue = self.executors_use_task_queue[0]
+            payload = {
+                "nodes-map": nodes, 
+                "lambda-debug": self.lambda_debug, 
+                "use-bit-counters": self.use_bit_dep_checking, 
+                EXECUTOR_TASK_QUEUE_KEY: self.executors_use_task_queue, 
+                "starting-node-key": starting_node_key, 
+                "use-fargate": self.use_fargate,
+                "executor_function_name": self.executor_function_name,
+                "invoker_function_name": self.invoker_function_name,
+                "proxy_address": self.proxy_address,
+                TASK_TO_FARGATE_MAPPING: path.tasks_to_fargate_nodes,
+                # If self.reuse_lambdas is False, then we don't care if this is a leaf task or not.
+                # We're not going to use it no matter what, so we may as well treat it like its not.
+                "is-leaf": leaf_tasks.get(task_key, False) and self.reuse_lambdas 
+            }
+            serialized_payload = ujson.dumps(payload)
             serialized_paths[task_key] = serialized_payload
-            if print_debug:
-                print("Path beginning at task {} will be stored in Redis.".format(task_key))
-            path_key = task_key + "---path"
-            if print_debug:
-                print("\nLength of Path: ", len(nodes), " tasks")
-                print("Size of Path: ", sys.getsizeof(serialized_payload), " bytes")
+            #if self.print_debug:
+            #    host = self.big_hash_ring.get_node_hostname(task_key)
+            #    port = self.big_hash_ring.get_node_port(task_key)
+            #    print("Path beginning at task {} will be stored in Redis instance listening at {}:{}".format(task_key, host, port))
+            path_key = task_key + PATH_KEY_SUFFIX
+            if self.print_debug and self.print_level <= 1:
+                print("\nPath #{} - {}".format(path_counter, task_key))
+                print("\tLength of Path:", len(nodes), "tasks")
+                path_size = sys.getsizeof(serialized_payload)
+                print("\tSize of Path:", path_size, "bytes")
+                path_sizes.append(path_size)
+            #associated_redis_client = self.big_hash_ring.get_node_instance(task_key)
+            initial_payloads[self.dcp_redis][path_key] = serialized_payload  
+            path_counter += 1
             
-            #hash_obj = hashlib.md5(task_key.encode())
-            #val = int(hash_obj.hexdigest(), 16)
-            #dict_index = val % self.num_redis_clients
-            #initial_payloads[dict_index][path_key] = serialized_payload
-            associated_redis_client = self.hash_ring.get_node_instance(task_key)
-            initial_payloads[associated_redis_client][path_key] = serialized_payload
-            #if val % 2 == 0:
-            #    initial_redis_payload1[path_key] = serialized_payload
-            #else:
-            #    initial_redis_payload2[path_key] = serialized_payload
+        _serialization_done = pythontime.time()
+        _serialization_length = _serialization_done - _serialization_start
+        
+        metrics["Path-Serialization"] = _serialization_length
 
-        print("[ {} ] Done populating payloads. Storing paths in Redis now.".format(datetime.datetime.utcnow()))
+        print("[ {} ] Done serializing all {} payloads. Took {} seconds. Storing paths in Redis now.".format(datetime.datetime.utcnow(), len(serialized_paths), _serialization_length))
 
-        if print_debug:
+        if self.print_debug and self.print_level <= 3:
             print("\nStoring dependency counters and paths now...")
             print("Number of paths to store: ", len(tasks_to_path_starts))
-
-        # Store everything.
-        #for idx in range(len(initial_payloads)):
-        #    initial_redis_payload = initial_payloads[idx]
-        #    if len(initial_redis_payload) > 0:
-        #        redis_client = self.redis_clients[idx]
-        #        redis_client.mset(initial_redis_payload)
         
+        _store_paths_redis_start = pythontime.time()
+
+        if self.use_fargate:
+        # Add metadata to payload.
+            # TODO: Optimize this process; fix any and all issues with using DFS exclusively for fargate data.
+            for task_key, fargate_dict in self.tasks_to_fargate_nodes.items():
+                fargate_metadata_key = task_key + FARGATE_DATA_SUFFIX
+                initial_payloads[self.dcp_redis][fargate_metadata_key] = ujson.dumps(fargate_dict)
+
         # Store everything.
         for client, payload in initial_payloads.items():
             if len(payload) > 0:
                 client.mset(payload)
 
-        #if len(initial_redis_payload1) > 0:
-        #    self.redis_client1.mset(initial_redis_payload1)
-        #if len(initial_redis_payload2) > 0:
-        #    self.redis_client2.mset(initial_redis_payload2)
+        _store_paths_redis_stop = pythontime.time()
+        _store_paths_redis_length = _store_paths_redis_stop - _store_paths_redis_start
+
+        metrics["Store-Paths-Redis"] = _store_paths_redis_length
 
         print("[ {} ] Done storing paths in Redis. Invoking Lambdas now.".format(datetime.datetime.utcnow()))
 
         # Construct a payload to send to the Redis proxy containing the keys for all paths 
         # in this graph. The proxy can then just grab the paths from Redis (and thus the path nodes).
-        path_keys_for_proxy = [_key + "---path" for _key in serialized_paths]
-        if print_debug:
+        path_keys_for_proxy = [_key + PATH_KEY_SUFFIX for _key in serialized_paths]
+        if self.print_debug and self.print_level <= 1:
             print("Path keys for Redis Proxy: ", path_keys_for_proxy)
-        payload_for_proxy = {"op": "graph-init", "path-keys": path_keys_for_proxy, "scheduler-address": self.address}
+        #payload_for_proxy = {"op": "graph-init", "path-keys": path_keys_for_proxy, "scheduler-address": self.address}
 
-        self.loop.add_callback(self.send_message_to_proxy, payload = payload_for_proxy)
+        #self.loop.add_callback(self.send_message_to_proxy, payload = payload_for_proxy)
 
-        if print_debug:
+        if self.print_debug and self.print_level <= 1:
             print("Stored the following paths in Redis: ")
             for task_key in serialized_paths:
-                path_key = task_key + "---path"
+                path_key = task_key + PATH_KEY_SUFFIX
                 print(path_key)
 
+        _invoke_leaf_tasks_start = pythontime.time()
+        
+        num_invoked = 0
+        num_existing = 0
         # Invoke all of the leaf tasks.
-        for leaf_task_key, leaf_task_state in leaf_tasks:
-            payload = serialized_paths[leaf_task_key]
-            # We can only send a payload of size 256,000 bytes or less to a Lambda function directly.
-            # If the payload is too large, then the Lambda will retrieve it from Redis via the key we provide.
-            if sys.getsizeof(payload) > 256000:
-                payload = json.dumps({"path-key": leaf_task_key + "---path"})
-            self.batched_lambda_invoker.send(payload)
+        for leaf_task_key, leaf_task_state in leaf_tasks.items():
+            # If we're just not re-using Lambdas, then bypass the check. If we are
+            # re-using Lambdas, then we'll only want to invoke this if we haven't seen
+            # it before. If we have, then writing its path to Redis should've triggered
+            # the Lambda's execution for the next phase/iteration of the workload.
+            if self.reuse_lambdas == False:
+                payload = serialized_paths[leaf_task_key]
 
-        print("[ {} ] - Scheduler: all {} leaf node tasks have been submitted to Batched Lambda Invoker for invocation and execution.".format(datetime.datetime.utcnow(), len(leaf_tasks)))
+                # We can only send a payload of size 256,000 bytes or less to a Lambda function directly.
+                # If the payload is too large, then the Lambda will retrieve it from Redis via the key we provide.
+                if sys.getsizeof(payload) > max_path_size_bytes:
+                    # Create a new payload (that is definitely smaller than 256,000 bytes).
+                    # The new payload will specify where to retrieve the original payload.
+                    updated_payload = {
+                        "path-key": leaf_task_key + PATH_KEY_SUFFIX,
+                        "use-fargate": self.use_fargate,
+                        "executor_function_name": self.executor_function_name,
+                        "invoker_function_name": self.invoker_function_name,
+                        "proxy_address": self.proxy_address                        
+                    }
+                    payload = ujson.dumps(updated_payload)
+                self.batched_lambda_invoker.send(payload)
+                num_invoked += 1                
+            elif self.seen_leaf_tasks.get(leaf_task_key, False) == False:
+                payload = serialized_paths[leaf_task_key]
 
-        print("Largest Fanout: Task {} with a fanout factor of {}!".format(largest_fanout_task_key, largest_fanout))
+                # We can only send a payload of size 256,000 bytes or less to a Lambda function directly.
+                # If the payload is too large, then the Lambda will retrieve it from Redis via the key we provide.
+                if sys.getsizeof(payload) > max_path_size_bytes:
+                    # Create a new payload (that is definitely smaller than 256,000 bytes).
+                    # The new payload will specify where to retrieve the original payload.
+                    updated_payload = {
+                        "path-key": leaf_task_key + PATH_KEY_SUFFIX,
+                        "use-fargate": self.use_fargate,
+                        "executor_function_name": self.executor_function_name,
+                        "invoker_function_name": self.invoker_function_name,
+                        "proxy_address": self.proxy_address                        
+                    }
+                    payload = ujson.dumps(updated_payload)
+                self.dcp_redis.set(leaf_task_key + ITERATION_COUNTER_SUFFIX, 0)
+                self.batched_lambda_invoker.send(payload)
+                num_invoked += 1
+
+                # Record that we've now seen this leaf task and increment is counter in Redis.
+                self.seen_leaf_tasks[leaf_task_key] = True 
+            else:
+                if self.print_debug and self.print_level <= 2:
+                    print("[LEAF TASK] Encountered leaf task {} while invoking. It has been seen before.".format(leaf_task_key))
+                    
+                    # Leaf Lambdas will be subscribed to a channel with name of the form PREFIX + leaf_task_key + PATH_SUFFIX.
+                    #channel = leaf_task_channel_prefix + leaf_task_key + PATH_KEY_SUFFIX
+                    #channel = leaf_task_key + PATH_KEY_SUFFIX
+                    #num_subscribed = self.dcp_redis.execute_command('PUBSUB', 'NUMSUB', channel)[1]
+
+                    #if self.print_debug and self.print_level <= 2:
+                    #    print("\tNumber of Subscribers to {}: {}".format(channel, num_subscribed))
+
+                    # Make sure that there is at least one Lambda subscribed to the channel. If there aren't any, then it's quite possible
+                    # that the leaf Lambda gave up already and thus we need to invoke a new leaf Lambda, or else the task will never get executed.
+                    #if num_subscribed < 1:
+                    #    print("\t[WARNING] No subscribers found for channel {}... explicitly invoking leaf task to be safe...".format(channel))
+                    #    payload = serialized_paths[leaf_task_key]
+
+                        # We can only send a payload of size 256,000 bytes or less to a Lambda function directly.
+                        # If the payload is too large, then the Lambda will retrieve it from Redis via the key we provide.
+                    #    if sys.getsizeof(payload) > max_path_size_bytes:
+                    #        payload = ujson.dumps({"path-key": leaf_task_key + PATH_KEY_SUFFIX})
+                    #    self.batched_lambda_invoker.send(payload)
+                    #    self.seen_leaf_tasks[leaf_task_key] = True    
+                    #    num_invoked += 1
+                    #else:
+                    #num_existing += 1
+                    print("\tOpting not to invoke Lambda for {}".format(leaf_task_key))
+                #channel = leaf_task_key + PATH_KEY_SUFFIX
+                num_existing += 1
+                # Publish message to the Lambda.
+                # self.dcp_redis.publish(channel, "set")
+                self.dcp_redis.incr(leaf_task_key + ITERATION_COUNTER_SUFFIX)
+
+
+        _invoke_leaf_tasks_stop = pythontime.time()
+        _invoke_leaf_tasks_length = _invoke_leaf_tasks_stop - _invoke_leaf_tasks_start
+
+        metrics["Invoke-Leaf-Tasks"] = _invoke_leaf_tasks_length
+
+        print("[ {} ] - Scheduler: {} leaf tasks have been submitted for invocation while {} were already existing ({} total).".format(datetime.datetime.utcnow(), num_invoked, num_existing, len(leaf_tasks)))
+
+        print("[INFO] Largest Fanout: Task {} with a fanout factor of {}!".format(largest_fanout_task_key, largest_fanout))
+        if (self.print_debug and self.print_level <= 1):
+            # Avoid ZeroDivisionErrors by checking length of arrays before attempting to divide by said lengths. That being said,
+            # these lengths should almost always be non-zero.
+            if len(task_sizes) != 0:
+                print("[INFO] Average task size: {} bytes.".format(sum(task_sizes) / len(task_sizes)))
+            else:
+                # Print some sort of warning since zero tasks may indicate an error...
+                print("[WARNING] There were no tasks. Average task size in bytes: N/A.")
+            if len(path_sizes) != 0:
+                print("[INFO] Average path size: {} bytes.".format(sum(path_sizes) / len(path_sizes)))
+            else:
+                # Print some sort of warning since zero tasks may indicate an error...
+                print("[WARNING] There were no paths. Average path size in bytes: N/A.")
 
         # TO-DO: 
         # - Serialize each path.
@@ -2157,8 +2839,7 @@ class Scheduler(ServerNode):
         #       - Store payload/path under <task key> + "---payload" or <task key> + "---path".
         # - Invoke each leaf task, sending the associated path as its payload.
 
-        # print("[ {} ] Scheduler - INFO: Invoked {} leaf tasks.".format(datetime.datetime.utcnow(), len(immediately_invocable_task_payloads)))
-        # print("                         Average taks size: {} bytes.".format(sum(task_sizes) / len(task_sizes)))
+        #print("[ {} ] Scheduler - INFO: Invoked {} leaf tasks.".format(datetime.datetime.utcnow(), len(immediately_invocable_task_payloads)))
 
         # Transition everything to processing.
         for tk, ts in self.tasks.items():
@@ -2170,15 +2851,36 @@ class Scheduler(ServerNode):
             if ts.state in ("memory", "erred"):
                 self.report_on_key(ts.key, client=client)
 
-        end = time()
+        end = pythontime.time()
         if self.digests is not None:
             self.digests["update-graph-duration"].add(end - start)
         _now = datetime.datetime.utcnow()
+        print("Number of Tasks: ", len(tasks))
+        print("Number of Leaf Tasks: ", len(leaf_tasks))        
         print("[ {} ] Scheduler - INFO: Update graph duration was {} seconds.".format(_now, end - start))
+        for _label,_length in metrics.items():
+            print("{} took {} seconds...".format(_label, _length))
         # TODO: balance workers
 
-    def construct_basic_task_payload(self, task_key, ts):
-        """Construct a standard payload for a given task state and task key."""
+    def construct_basic_task_payload(self, task_key, ts, already_executed = False, persist = False):
+        """Construct a standard payload for a given task state and task key. Used by AWS Lambda functions when executing tasks.
+        
+            Args:
+                task_key (str):             the corresponding task key.
+
+                ts (TaskState):             the TaskState object used to construct the basic payload.
+
+                already_executed (bool):    indicates whether or not this task has previously been executed (i.e., in a prev. workload)
+                                            and therefore does not need to be executed again. The data can just be retrieved from Redis.
+                                            If the data is not found, then the Task Executor responsible for this task will just re-execute
+                                            the task to obtain the data.
+                
+                persist (bool):             If true, then this task is part of a Persist operation. This means that the task should write its 
+                                            data to Fargate EVEN IF IT IS A FINAL RESULT.
+
+            Returns:
+                dict: A dictionary with the information needed by the AWS Lambda Task Executors for executing the given task.
+        """
 
         # Compute the number of dependents for this task. The dependents are downstream tasks that require this task's data.
         num_dependencies_of_dependents = {dependent.key : len(dependent.dependencies) for dependent in ts.dependents}
@@ -2186,21 +2888,22 @@ class Scheduler(ServerNode):
         # The basic payload.
         payload = {
             "key": task_key,
-            #"nbytes": {dep.key : dep.nbytes for dep in ts.dependencies},
+            "persist": persist,
             "dependencies": [dep.key for dep in ts.dependencies], # We want the keys as they correspond to entries in the Elasticache.
-            #"duration": self.get_task_duration(ts),
             "scheduler-address": self.address,
+            "use-fargate": self.use_fargate,
             "num-dependencies-of-dependents": num_dependencies_of_dependents,
-            "proxy-channel": self.redis_channel_names_for_proxy[self.current_redis_proxy_channel_index],
+            #"proxy-channel": self.redis_channel_names_for_proxy[self.current_redis_proxy_channel_index],
             "chunk-large-tasks": self.chunk_large_tasks,
-            "chunk-task-threshold": self.chunk_task_threshold,
-            "num-chunks-for-large-tasks": self.num_chunks_for_large_tasks or -1
+            "big-task-threshold": self.big_task_threshold,
+            "num-chunks-for-large-tasks": self.num_chunks_for_large_tasks or -1,
+            "already-executed": already_executed
         }  
 
         # Reset the index if it is now too large.
-        self.current_redis_proxy_channel_index += 1
-        if self.current_redis_proxy_channel_index >= self.num_redis_proxy_channels:
-            self.current_redis_proxy_channel_index = 0
+        #self.current_redis_proxy_channel_index += 1
+        #if self.current_redis_proxy_channel_index >= self.num_redis_proxy_channels:
+        #    self.current_redis_proxy_channel_index = 0
 
         # The run spec defines how to execute the task. This includes the task's code.
         task_run_spec = ts.run_spec
@@ -2212,8 +2915,244 @@ class Scheduler(ServerNode):
             # If the task is not a dictionary, then it's presumably a serialized object so we just include it directly. The Lambda will deserialize it.
             payload["task"] = task_run_spec
         
+        if self.print_debug and self.print_level <= 1:
+            run_spec_str = str(task_run_spec)
+            if self.print_debug_max_chars > 0:
+                run_spec_str = run_spec_str[0:self.print_debug_max_chars] + "..."
+            print("Run Spec for {}: {}".format(task_key, run_spec_str))
+
         return payload 
     
+    def launch_fargate_nodes(self, desired_num_tasks, fargate_tasks, max_retries = 30):
+        # Check if the user is requests more Fargate tasks than the platform allows.
+        if (desired_num_tasks > MAX_FARGATE_TASKS):
+            print("[WARNING] Specified {} Fargate nodes, which is greater than maximum of {}. Clamping value to {}.".format(desired_num_tasks, MAX_FARGATE_TASKS, MAX_FARGATE_TASKS))
+            desired_num_tasks = MAX_FARGATE_TASKS
+        
+        if (desired_num_tasks <= 0):
+            print("[Warning] Specified {} Fargate nodes, which is not valid. Using {} instead.".format(desired_num_tasks, DEFAULT_NUM_FARGATE_NODES))
+            desired_num_tasks = DEFAULT_NUM_FARGATE_NODES
+            
+        print("[FARGATE] There are already {} tasks running according to the Scheduler's internal records...".format(len(self.workload_fargate_tasks['current'])))
+
+        # Check for existing service.
+        describe_services_response = self.ecs_client.describe_services(
+            cluster = self.ecs_cluster_name,
+            services = [ECS_SERVICE_NAME]
+        )
+
+        services = describe_services_response['services']
+        
+        # Check if there already exists a service.
+        if len(services) == 0:
+            if self.print_debug:
+                print("[FARGATE] No existing services. Creating new service {} with task definition {}, desired count {}, etc.".format(ECS_SERVICE_NAME, self.ecs_task_definition, desired_num_tasks))
+
+            # No existing service...
+            self.ecs_client.create_service(
+                cluster = self.ecs_cluster_name,
+                serviceName = ECS_SERVICE_NAME,
+                taskDefinition = self.ecs_task_definition,
+                desiredCount = desired_num_tasks,
+                platformVersion = 'LATEST',
+                networkConfiguration = self.ecs_network_configuration,
+                #loadBalancers = [None],
+                schedulingStrategy = 'REPLICA',
+                tags = [{
+                    'key': FARGATE_TASK_TAG,
+                    'value': FARGATE_TASK_TAG
+                }]
+            )                                      
+        else:
+            wukong_service = services[0]
+            if self.print_debug:
+                print("Existing service's status: {}".format(wukong_service['status']))
+            # Make sure the existing service is active before attempting to use it/interact with it. 
+            if wukong_service['status'] == 'INACTIVE':
+
+                if self.print_debug:
+                    print("[FARGATE] Existing service is 'INACTIVE.' Creating new service {} with task definition {}, desired count {}, etc.".format(ECS_SERVICE_NAME, self.ecs_task_definition, desired_num_tasks))
+
+                self.ecs_client.create_service(
+                    cluster = self.ecs_cluster_name,
+                    serviceName = ECS_SERVICE_NAME,
+                    taskDefinition = self.ecs_task_definition,
+                    desiredCount = desired_num_tasks,
+                    platformVersion = 'LATEST',
+                    networkConfiguration = self.ecs_network_configuration,
+                    #loadBalancers = [None],
+                    schedulingStrategy = 'REPLICA',
+                    tags = [{
+                        'key': FARGATE_TASK_TAG,
+                        'value': FARGATE_TASK_TAG
+                    }]
+                )        
+            else:
+                existing_service_desired_count = wukong_service['desiredCount']
+
+                # Check if we need to update the existing service to match our desired number of tasks.
+                if existing_service_desired_count != desired_num_tasks:
+
+                    if self.print_debug:
+                        print("[FARGATE] Updating existing service {} with new desired count of {}. (It was {})".format(ECS_SERVICE_NAME, desired_num_tasks, existing_service_desired_count))
+
+                    self.ecs_client.update_service(
+                        cluster = self.ecs_cluster_name,
+                        service = ECS_SERVICE_NAME,
+                        desiredCount = desired_num_tasks
+                    )
+        
+        num_running = -1
+
+        num_checks = 0
+        while num_running != desired_num_tasks:
+            describe_services_response = self.ecs_client.describe_services(
+                        cluster = self.ecs_cluster_name,
+                        services = [ECS_SERVICE_NAME]
+                    )    
+            services = describe_services_response['services']
+            wukong_service = services[0]
+            num_running = wukong_service['runningCount']
+
+            # If we're growing the Fargate cluster, then we should pri.nt how many tasks have started running so far out of how
+            # many we asked for. If we're shrinking the Fargate cluster, then we should print how many tasks still need to stop.
+            if num_running < desired_num_tasks:
+                print("[FARGATE - {}] {}/{} have entered the 'RUNNING' state...".format(datetime.datetime.utcnow(), num_running, desired_num_tasks))
+            elif num_running < desired_num_tasks:
+                num_to_stop = desired_num_tasks - num_running
+                print("[FARGATE] Still waiting for another {} tasks to stop...".format(num_to_stop))
+            num_checks = num_checks + 1
+            
+            # Only sleep if this isn't our first check and the tasks haven't finished starting.
+            if num_checks != 1 and num_running != desired_num_tasks:
+                pythontime.sleep(5)
+        
+        print("[FARGATE] All {} tasks have entered the 'RUNNING state. Collecting metadata now.".format(desired_num_tasks))
+
+        # TODO: Add option to skip this if the number of nodes hasn't changed.
+        # Or just show new nodes/nodes that we don't already have (without having
+        # to call list_tasks and describe_tasks for all of them). Like perhaps filter
+        # through which tasks we already have first, before calling describe_tasks... 
+        
+        task_arn_lists = list()
+        # List the tasks.
+        list_tasks_response = self.ecs_client.list_tasks(cluster = self.ecs_cluster_name)
+        taskArns = list_tasks_response['taskArns']
+        task_arn_lists.append(taskArns)
+        while 'nextToken' in list_tasks_response:
+            nextToken =list_tasks_response['nextToken']
+            list_tasks_response = self.ecs_client.list_tasks(cluster = self.ecs_cluster_name, nextToken = nextToken)
+            taskArns = list_tasks_response['taskArns']
+            task_arn_lists.append(taskArns)  
+        task_descriptions = list() 
+        for task_arn_list in task_arn_lists:
+            descriptions = self.ecs_client.describe_tasks(cluster = self.ecs_cluster_name, tasks = task_arn_list)['tasks']
+            task_descriptions.extend(descriptions)
+        
+        # Iterate over all of the running tasks...
+        for task_description in task_descriptions:
+            if task_description['group'] == FARGATE_TASK_GROUP:
+                taskArn = task_description['taskArn']
+                privateIP = task_description['containers'][0]['networkInterfaces'][0][FARGATE_PRIVATE_IP_KEY]
+                # Otherwise, collect the information and store it.
+                eniID = task_description['attachments'][0]['details'][1]['value']
+                network_interface_description = self.ec2_client.describe_network_interfaces(NetworkInterfaceIds = [eniID])
+                publicIP = network_interface_description['NetworkInterfaces'][0]['Association']['PublicIp']                    
+                fargate_node = {
+                    FARGATE_ARN_KEY: taskArn,
+                    FARGATE_ENI_ID_KEY: eniID,
+                    FARGATE_PUBLIC_IP_KEY: publicIP,
+                    FARGATE_PRIVATE_IP_KEY: privateIP
+                }
+                # We may already have this task in our collection, in which case just ignore it.
+                if not fargate_node in fargate_tasks:
+                    fargate_tasks.append(fargate_node)         
+
+    def launch_tasks(self, remaining, max_retries, starting):
+        """ Launch Fargate tasks.
+
+            Args:
+                remaining (int):   the number of tasks we (still) need to launch.
+                
+                max_retries (int): the number of times we'll attempt to make a call to self.ecs_client.run_tasks(...) before giving up.
+
+                starting (list):       list of Fargate tasks we've started.
+            Returns:
+                bool -- Flag indicating whether or not we launched all of the tasks (as far as we can tell).
+        """
+        # The base wait interval in milliseconds.
+        base_wait_interval = 100
+
+        # Keep invoking tasks (10 at a time, or less if there are less than 10 tasks that need to be invoked).
+        while (remaining > 0):
+            retry = True # Starts out as true so we enter the while-loop body at least once.
+            retries = 0
+            
+            num_invoke = -1 
+            # Again, you can only invoke ten tasks at a time via the run_task API.
+            if remaining > 10:
+                num_invoke = 10
+            else:
+                num_invoke = remaining
+            remaining = remaining - num_invoke
+            
+            # Eventually we'll just give up. 
+            while (retries < max_retries and retry):
+                print("[FARGATE] Trying to launch {} of the {} remaining Fargate tasks...".format(num_invoke, remaining))
+                try:
+                    response = self.ecs_client.run_task(cluster = self.ecs_cluster_name,
+                                                        #capacityProviderStrategy = [{
+                                                        #    'capacityProvider': 'FARGATE_SPOT', # This has a maximum of 250 tasks so we'll use this ('FARGATE' only allows 100 tasks).
+                                                        #    'weight': 1,            # Relative percentage of tasks that should be launched with this strategy/provider.
+                                                        #                            # This is our only strategy so the value shouldn't manner.
+                                                        #    'base': 1               # This defines the minimum # of tasks to be launched with this strategy.
+                                                        #                            # This is our only strategy so the value shouldn't manner.
+                                                        #}],
+                                                        #launchType = 'FARGATE',
+                                                        taskDefinition = self.ecs_task_definition,
+                                                        group = FARGATE_TASK_GROUP,
+                                                        count = num_invoke,
+                                                        platformVersion = 'LATEST',
+                                                        networkConfiguration = self.ecs_network_configuration)
+                    retry = False
+                    
+                    if self.print_debug:
+                        #print(response, "\n\n")
+                        print("[FARGATE] Launched {} of the {} remaining Fargate tasks...".format(num_invoke, remaining))
+
+                    starting.extend(response['tasks'])
+
+                    pythontime.sleep(0.5)
+                except Exception as ex:
+                    print("[{}] Fargate exception encountered...".format(datetime.datetime.utcnow()))
+                    print(ex)
+
+                    sleep_interval = ((2 ** retries) * base_wait_interval) / 1000.0
+                    print("[FARGATE] Sleeping for {} milliseconds...".format(sleep_interval * 1000))
+                    pythontime.sleep(sleep_interval)
+                    
+                    retry = True
+                    retries = retries + 1 
+
+                    # If we reached the maximum number of tries, return False indicating a failure to launch the nodes.
+                    if retries >= max_retries:
+                        return False       
+        return True 
+
+    def close_fargate_tasks(self):
+        """Close all Fargate tasks associated with the last job (or last jobs if you didn't close them in between workloads)."""
+        fargate_tasks = self.workload_fargate_tasks['current']
+
+        if self.print_debug:
+            print("[FARGATE] Stopping {} tasks...".format(len(fargate_tasks)))
+
+        for task_definition in fargate_tasks:
+            task_arn = task_definition['taskArn']
+            self.ecs_client.stop_task(
+                cluster = self.ecs_cluster_name,
+                task = task_arn)
+            fargate_tasks.remove(task_definition)
+
     @gen.coroutine 
     def send_message_to_proxy(self, payload, start_handling = False):
         if self.proxy_comm is None:
@@ -2222,11 +3161,122 @@ class Scheduler(ServerNode):
         elif self.proxy_comm is not None and self.proxy_comm.closed(): 
            print("[ {} ] [WARNING] Connection to proxy is closed... attempting to reconnect now...".format(datetime.datetime.utcnow()))
            self.proxy_comm = yield connect("tcp://" + self.proxy_address + ":8989", deserialize=self.deserialize, connection_args={})
-        print("Sending message to Redis proxy now...")
+        print("[ {} ] Sending message to Redis proxy now.".format(datetime.datetime.utcnow()))
+        # if (self.print_debug):
+            # print("[ {} ] Message contents:\n\t{}".format(datetime.datetime.utcnow(), payload))
         yield self.proxy_comm.write(payload, on_error="raise", serializers=["msgpack"]) 
         if start_handling:
             yield self.handle_stream(comm = self.proxy_comm)
+    
+    def check_health_of_fargate_tasks(self):
+        fargate_nodes = self.workload_fargate_tasks['current']
+        good_nodes = []
+        bad_nodes = []
+        counter = 1
+        for fn in fargate_nodes:
+            arn = fn[FARGATE_ARN_KEY]
+            #ip = fn[FARGATE_PUBLIC_IP_KEY]
+            ip = fn[FARGATE_PRIVATE_IP_KEY]
+            print("\nChecking Fargate node #{} -- Redis @ {}:6379 ({})".format(counter, ip, arn))
+            counter = counter + 1
+            try:
+                rc = redis.Redis(host = ip, port = 6379, db = 0, socket_timeout = 10, socket_connect_timeout = 10)
+                res = rc.ping() 
+                if res == False:
+                    print("\tCould not connect/ping...")
+                    bad_nodes.append(fn)
+                else:
+                    print("\tConnected and pinged successfully!")
+                    good_nodes.append(fn)
+            except:
+                bad_nodes.append(fn)
         
+        return {
+            "good": good_nodes,
+            "bad": bad_nodes
+        }
+
+    def stop_fargate_tasks(self, task_arns):
+        """ Tells the Scheduler to stop the Fargate tasks with ARNs defined in the task_arns parameter.
+
+            Args:
+                task_arns (list): List of Fargate Task ARNs associated with the tasks we'd like to stop.
+                                  Can also pass dicts so long as they have a key FARGATE_ARN_KEY (the key is equal to 
+                                  the value of the FARGATE_ARN_KEY constant) and the value associated with said
+                                  key is the ARN of the task. 
+            
+            Returns:
+                dict: A dictionary which maps ARNs --> the AWS response from the stop_task ECS boto3 function.
+
+        """
+        responses = {}
+        for x in task_arns:
+            arn = x 
+            if type(x) is dict:
+                arn = arn[FARGATE_ARN_KEY]
+            response = self.ecs_client.stop_task(cluster = self.ecs_cluster_name, task = arn)
+            responses[arn] = response
+
+        # Remove all the stopped Fargate nodes/tasks from our local mapping.
+        self.workload_fargate_tasks['current'] = [fn for fn in self.workload_fargate_tasks['current'] if fn[FARGATE_ARN_KEY] not in task_arns]
+
+        return responses
+
+    def flush_data_on_redis_shards(self, asynchronous = True, rewrite_address = True, socket_connect_timeout = 5, socket_timeout = 5):   
+        """ Clear all of the data on each Fargate shard and the EC2 Redis instance using the flushall command."""
+        self.dcp_redis.flushall(asynchronous = asynchronous)
+        for fargate_node in self.workload_fargate_tasks['current']:
+            #fargate_ip = fargate_node[FARGATE_PUBLIC_IP_KEY]
+            fargate_ip = fargate_node[FARGATE_PRIVATE_IP_KEY]
+            redis_client = redis.StrictRedis(host = fargate_ip, port = 6379, db = 0, socket_connect_timeout  = socket_connect_timeout, socket_timeout = socket_timeout)
+            redis_client.flushall(asynchronous = asynchronous)
+        if rewrite_address:
+            self.dcp_redis.set("scheduler-address", self.address)
+
+    def flush_db_data_on_redis_shards(self, asynchronous = True, rewrite_address = True, socket_connect_timeout = 5, socket_timeout = 5):   
+        """ Clear all of the data (in the current db) on each Fargate shard and the EC2 Redis instance using the flushdb command.
+        
+            Args:
+                asynchronous (bool): If True, execute the Redis command asynchronously (do not wait for response).
+
+                rewrite_address (bool): If True, rewrite the Scheduler's address to the dcp_redis server.
+            
+            Returns:
+                dict: Dictionary with two entries. 
+                    (1) The Fargate Node dictionaries (contain ARN, IP, and ENI ID) of nodes that had an error when executing the flushdb command
+                    (2) Just the IP addresses of those nodes (for easy passing to the 'stop_fargate_tasks' function)
+        """      
+        self.dcp_redis.flushdb(asynchronous = asynchronous)
+        counter = 1
+        bad_nodes = []
+        bad_ips = []
+        for fargate_node in self.workload_fargate_tasks['current']:
+            fargate_arn = fargate_node[FARGATE_ARN_KEY]
+            #fargate_ip = fargate_node[FARGATE_PUBLIC_IP_KEY] 
+            fargate_ip = fargate_node[FARGATE_PRIVATE_IP_KEY]
+            if self.print_debug:
+                print("\nAttempting to connect to Redis @ {}:6379 (ARN {})...".format(fargate_ip, fargate_arn))
+            redis_client = redis.StrictRedis(host = fargate_ip, port = 6379, db = 0, socket_connect_timeout  = socket_connect_timeout, socket_timeout = socket_timeout)
+            if self.print_debug:
+                print("\tConnection successful! Executing 'flushdb' command now...")
+            try:
+                redis_client.flushdb(asynchronous = asynchronous)
+            except:
+                print("Redis is configured to save RDB snapshots, but it is currently not able to persist on disk. Commands that may modify the data set are disabled, because this instance is configured to report errors during writes if RDB snapshotting fails.")
+                print("\tInstance is listening at {}:6379 ({}).".format(fargate_ip, fargate_arn))
+                bad_nodes.append(fargate_node)
+                bad_ips.append(fargate_ip)
+            if self.print_debug:
+                print("Flushed current db for Redis instance at {}:6379 ({}) [{}/{}]".format(fargate_ip, fargate_arn, counter, len(self.workload_fargate_tasks['current'])))
+            counter += 1
+        if rewrite_address:
+            self.dcp_redis.set("scheduler-address", self.address)      
+        
+        return {
+            "nodes": bad_nodes,
+            "ips": bad_ips
+        }
+
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
         logger.debug("Stimulus task finished %s, %s", key, worker)
@@ -2256,11 +3306,11 @@ class Scheduler(ServerNode):
 
         return recommendations
 
-    def get_redis_client(self, task_key):
-        hash_obj = hashlib.md5(task_key.encode())
-        val = int(hash_obj.hexdigest(), 16)
-        client_index = val % self.num_redis_clients
-        return self.redis_clients[client_index]
+    #def get_redis_client(self, task_key):
+    #    hash_obj = hashlib.md5(task_key.encode())
+    #    val = int(hash_obj.hexdigest(), 16)
+    #    client_index = val % self.num_redis_clients
+    #    return self.redis_clients[client_index]
 
     def stimulus_task_finished_lambda(self, key = None, **kwargs):
         """Mark that a particular task has finished execution on AWS Lambda """
@@ -2276,21 +3326,23 @@ class Scheduler(ServerNode):
             # print("**kwargs: ", kwargs)
             recommendations = self.transition(key, "memory", worker = None, **kwargs)
             
-            # print("Task State AFTER transitioning for Task {} is {}.".format(key, ts.state))
-            # print("Recommendations: ", recommendations)
-            if ts.state == "memory":
+            if self.print_debug and self.print_level <= 1:
+                print("Task State AFTER transitioning for Task {} is {}.".format(key, ts.state))
+                print("Recommendations: ", recommendations)
+            #if ts.state == "memory":
                 # assert memcache_client.get(key.replace(" ", "_")) != None 
                 # print("redis_client.get(key): ", redis_client.get(key))
-                assert self.hash_ring[key].exists(key) != 0
+                #assert self.small_hash_ring[key].exists(key) != 0 or self.big_hash_ring[key].exists(key) != 0
+                #assert self.dcp_redis.exists(key) != 0
                 #assert self.get_redis_client(key).exists(key) != 0
         else:
             # print("DEBUG: Received already computed task from AWS Lambda. State {}, Key: {}".format(ts.state, key))
-            logger.debug(
-                "Received already computed task, state: %s"
-                ", key: %s",
-                ts.state,
-                key,
-            )        
+            #logger.debug(
+            #    "Received already computed task, state: %s"
+            #    ", key: %s",
+            #    ts.state,
+            #    key,
+            #)        
             #print("Received already compute task, state: {}, key: {}".format(ts.state, key))            
             recommendations = {}
         return recommendations
@@ -2327,7 +3379,7 @@ class Scheduler(ServerNode):
 
     def stimulus_task_erred_lambda(self, key = None, exception = None, traceback = None, **kwargs):
         """ Mark that a task has erred on a particular worker """
-        logger.debug("Stimulus task erred %s, %s", key, worker) 
+        #logger.debug("Stimulus task erred %s, %s", key, worker) 
         print("Stimulus task erred {}".format(key))
         print("Exception: {}\nTraceback: {}".format(exception, traceback))
         ts = self.tasks.get(key)
@@ -2585,6 +3637,7 @@ class Scheduler(ServerNode):
     ###################
 
     def validate_released(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("validate_released"))
         ts = self.tasks[key]
         assert ts.state == "released"
         assert not ts.waiters
@@ -2763,7 +3816,7 @@ class Scheduler(ServerNode):
             bcomm = BatchedSend(interval="2ms", loop=self.loop)
             bcomm.start(comm)
             self.client_comms[client] = bcomm
-            bcomm.send({"op": "stream-start", "redis_endpoints": self.redis_endpoints})              
+            bcomm.send({"op": "stream-start", REDIS_ADDRESS_KEY: self.proxy_address}) 
             try:
                 yield self.handle_stream(comm=comm, extra={"client": client})
             finally:
@@ -2808,68 +3861,37 @@ class Scheduler(ServerNode):
         )
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
-    def submit_task_to_lambda(self, key):
-        for line in traceback.format_stack():
-            print(line.strip())    
+    #def submit_task_to_lambda(self, key):
+        #for line in traceback.format_stack():
+        #    print(line.strip())    
         # Debug-related...
         # print("[", str(datetime.datetime.utcnow()), "]   Submitting Task ", key, " to Lambda...")
-        debug_msg = "[" + str(datetime.datetime.utcnow()) + "]   Submitting Task " + key + " to Lambda..."
-        logger.debug(debug_msg)
-        task_state = self.tasks[key]   
-        dependencies = task_state.dependencies
-        timestamp_submitted = str(datetime.datetime.utcnow())
+        #debug_msg = "[" + str(datetime.datetime.utcnow()) + "]   Submitting Task " + key + " to Lambda..."
+        #logger.debug(debug_msg)
+        #task_state = self.tasks[key]   
+        #dependencies = task_state.dependencies
         # TO-DO: Need to check if the result already exists in the Elasticache cluster...
-        payload = {
-            "key": key,
-            "proxy-channel": self.redis_channel_names_for_proxy[self.current_redis_proxy_channel_index],
-            #"nbytes": {dep.key : dep.nbytes for dep in dependencies},
-            "deps": [dep.key for dep in dependencies], # We want the keys as they correspond to entries in the Elasticache.
-            #"duration": self.get_task_duration(task_state),
-            "scheduler-address": self.address,
-            #"submitted-at": timestamp_submitted
-        }
-        self.current_redis_proxy_channel_index += 1
-        if self.current_redis_proxy_channel_index >= self.num_redis_proxy_channels:
-            self.current_redis_proxy_channel_index = 0
-        task = task_state.run_spec
-        if type(task) is dict:
-            payload.update(task)
-        else:
-            payload["task"] = task 
+        #payload = {
+        #    "key": key,
+        #    "proxy-channel": self.redis_channel_names_for_proxy[self.current_redis_proxy_channel_index],
+        #    "deps": [dep.key for dep in dependencies],# We want the keys as they correspond to entries in the Elasticache.
+        #}
+        #self.current_redis_proxy_channel_index += 1
+        #if self.current_redis_proxy_channel_index >= self.num_redis_proxy_channels:
+        #    self.current_redis_proxy_channel_index = 0
+        #task = task_state.run_spec
+        #if type(task) is dict:
+        #    payload.update(task)
+        #else:
+        #    payload["task"] = task 
             #task_deserialized = task.deserialize()
-        temp = list(dumps(payload))
-        payload_bytes = []
-        for bytes_object in temp:
-            payload_bytes.append(base64.encodestring(bytes_object).decode(ENCODING))
-
-        # Check down-stream tasks. 
-        # Make list of down-stream tasks.
-        #   Create 
-        #to_be_serialized = {"task_list": [payload_bytes], "scheduler-address": self.address, "redis-channel": redis_channel_names[self.redis_channel_index]}
-
-        self.batched_lambda_invoker.send(payload_bytes)
-        
-        #serialized = json.dumps(to_be_serialized)
-        #lambda_client.invoke(FunctionName='FunctionExecutor', InvocationType='Event', Payload=serialized)
-        
-        # payload = {"payload": payload_bytes}
-        # JSON only supports unicode strings. Since Base64 can encode bytes to UTF-8 bytes, we can use that codec to decode the data.
-        # serialized_payload = json.dumps(payload)
-        # if self.print_serialized:
-           # print("serialized_payload: ", serialized_payload)
-        # We invoke this as an event so it is asynchronous. We do not grab the response. Instead, the Lambda will inform the scheduler itself.
-        # lambda_client.invoke(FunctionName='FunctionExecutor', InvocationType='Event', Payload=serialized_payload)
-    
-    # def queue_task_for_lambda(self, payload):
-       # queue_size = len(self.lambda_queue)
-       # new_key = "task" + str(queue_size)
-       # self.lambda_queue[new_key] = payload 
-       # if (queue_size + 1) == self.lambda_queue_send_size:
-          # # Send tasks to Lambda 
-          # serialized_payload = json.dumps(self.lambda_queue)
-          # lambda_client.invoke(FunctionName="FunctionExecutor", InvocationType="Event", Payload=serialized_payload)
-          # # Clear the queue.
-          # self.lambda_queue.clear()
+        #payload_serialized = list(dumps(payload))
+        # temp = list(dumps(payload))
+        #payload_bytes = []
+        #for bytes_object in temp:
+        #    payload_bytes.append(base64.encodestring(bytes_object).decode(ENCODING))
+#
+        #self.batched_lambda_invoker.send(payload_serialized)
     
     @gen.coroutine
     def deserialize_payload(self, payload):
@@ -2931,11 +3953,14 @@ class Scheduler(ServerNode):
         
             When a message is found, it is passed to the main Scheduler process via the queue given to this process. ''' 
         print("Redis Polling Process started. Polling channel ", redis_channel_name)
-        
-        IP, port = redis_endpoint
 
-        redis_client = redis.StrictRedis(host=IP, port = port, db = 0)
+        redis_client = redis.StrictRedis(host=redis_endpoint, port = 6379, db = 0)
         
+        base_sleep_interval = 0.05 
+        max_sleep_interval = 0.1 
+        current_sleep_interval = base_sleep_interval
+        consecutive_misses = 0
+
         # We just do pub-sub on the first redis client.
         redis_channel = redis_client.pubsub(ignore_subscribe_messages = True)
         redis_channel.subscribe(redis_channel_name)
@@ -2945,143 +3970,430 @@ class Scheduler(ServerNode):
         #
         # If no messages are found, then the thread will sleep before continuing to poll. 
         while True:
-            #timestamp_before_poll = datetime.datetime.utcnow()
             message = redis_channel.get_message()
-            #timestamp_after_poll = datetime.datetime.utcnow()
-            #time_elapsed = timestamp_after_poll - timestamp_before_poll
             if message is not None:
-                timestamp_now = datetime.datetime.utcnow()
-                # print("[ {} ]  Received message from channel {}.".format(timestamp_now, redis_channel_name))   
-                data = message["data"]
-                # The message should be a "bytes"-like object so we decode it.
-                # If we neglect to turn off the subscribe/unsubscribe confirmation messages,
-                # then we may get messages that are just numbers. 
-                # We ignore these by catching the exception and simply passing.
-                data = data.decode()
-                data = json.loads(data)
-                #time_sent_to_scheduler = data["time_sent_to_scheduler"]
-                #time_sent = datetime.datetime.strptime(time_sent_to_scheduler, "%Y-%m-%d %H:%M:%S.%f")
                 #timestamp_now = datetime.datetime.utcnow()
-                #time_elapsed = timestamp_now - time_sent
-                #_queue.put([data, timestamp_now, time_elapsed])
+                data = message["data"]
+                data = data.decode()
+                data = ujson.loads(data)
+                #if self.print_debug:
+                #    print("[ {} ] Received message from AWS Lambda...".format(timestamp_now))
+                #    print("\tMessage Contents: {}\n".format(data))
                 _queue.put([data])
-                # print("_queue.empty() == ", _queue.empty())
-            # else:
-                # Sleep for up to half a second (which would only happen after a large number of misses).
-                # pythontime.sleep(min(10 * num_misses, 100))
+                consecutive_misses = 0
+                current_sleep_interval = base_sleep_interval
+            else:
+                pythontime.sleep(current_sleep_interval + (random.uniform(0, 0.5) / 1000))
+                consecutive_misses = consecutive_misses + 1
+                current_sleep_interval += 0.05 
+                if (current_sleep_interval > max_sleep_interval):
+                    current_sleep_interval = max_sleep_interval
+
                 
     def consume_redis_queue(self):
         ''' This function executes periodically (as a PeriodicCallback on the IO loop). 
         
         It reads messages from the message queue until none are available.'''
-        #print("[ ", datetime.datetime.utcnow(), " ] Executing consume_redis_queue()...")
         messages = []
+
         # 'end' is the time at which we should stop iterating. By default, it is 50ms.
         stop_at = datetime.datetime.utcnow().microsecond + 5000
         while datetime.datetime.utcnow().microsecond < stop_at and len(messages) < 50:
             try:
                 timestamp_now = datetime.datetime.utcnow()
+
                 # Attempt to get a payload from the Queue. A 'payload' consists of a message
                 # and possibly some benchmarking data. The message will be at index 0 of the payload.
                 payload = self.redis_polling_queue.get(block = False, timeout = None)
                 message = payload[0]
-                # This is the time that the process put the message in the queue.
-                #sent_from_process = payload[1]
-                # This is the time it took for the process to get the message from
-                # Redis (after the Lambda put the message in Redis).
-                #lambda_to_process = payload[2]
-                # Calculate how long it took the Scheduler to get the message 
-                # compared to when the process put it in the queue. 
-                #process_to_scheduler = timestamp_now - sent_from_process
-                # Store the benchmark data.
-                #self.times_lambda_to_processes.append(lambda_to_process)
-                #self.times_processes_to_scheduler.append(process_to_scheduler)
                 messages.append(message)
             # In the case that the queue is empty, break out of the loop and process what we already have.
             except queue.Empty:
                 break
-        # Process all of the messages we got from the Queue.
-        #timestamp_now = datetime.datetime.utcnow()
-        #if len(messages) > 0:
-            #print("[ {} ] Processing {} messages from the queue.".format(timestamp_now, len(messages)))
-        # else:
-            # self.num_zero_processed += 1
         for msg in messages:
-            self.result_from_lambda(None, **msg)         
-        # if (len(messages) > 0):
-            # updated = datetime.datetime.utcnow()
-            # print("                               Spent {} seconds processing {} messages.".format(updated - timestamp_now, len(messages)))
-    
-    # def poll_redis_channel(self):
-        # messages = []
-        ##Grab messages one-at-a-time until we have fifty OR there are no more messages.
-        # while(len(messages) < 50):
-            # message = redis_channel.get_message()
-            ##If get_message() returned a message (as opposed to None)...
-            # if message:
-                # data = message["data"]
-                # try:
-                    ##The message should be a "bytes"-like object so we decode it.
-                    ##If we neglect to turn off the subscribe/unsubscribe confirmation messages,
-                    ##then we may get messages that are just numbers. 
-                    ##We ignore these by catching the exception and simply passing.
-                    # data = data.decode()
-                    # data = json.loads(data)
-                    # messages.append(data)
-                # except AttributeError:
-                    # pass 
-            # else:
-                ##If there were no messages, then just break out of 
-                ##the loop and process what we've already retrieved.            
-                # break 
-        # if len(messages) > 0:
-            # logger.debug("Processing {} messages from Redis...".format(len(messages)))
-            # if self.debug_print:
-                # timestamp = str(datetime.datetime.utcnow())
-                # print("[ {} ] Processing {} messages from Redis...".format(timestamp, len(messages)))
-                # print("Messages: ", messages)
-                # print("\n")        
-            # for msg in messages:
-                ##Pass the data to the result_from_lamresult_from_lambda function for processing.
-                # self.result_from_lambda(None, **msg)        
+            self.result_from_lambda(None, **msg)
                
-    def result_from_lambda(self, comm, op, task_key, execution_length = None, **msg):  
-        """ Handle the result from executing a task on AWS Lambda. """
+    def result_from_lambda(self, comm, op, task_key, lambda_id = None, time_sent = None, **msg):  
+        """ Handle the result from executing a task on AWS Lambda. """   
         self.num_messages_received_from_lambda = self.num_messages_received_from_lambda + 1
-        # if (lambda_length != None):
-            # self.sum_lambda_lengths = self.sum_lambda_lengths + lambda_length
-            # self.lambda_lengths.append(lambda_length)
-        # for message in messages:
-            # task_key = message["task_key"]
-        self.num_results_received_from_lambda = self.num_results_received_from_lambda + 1
-        if op == "lambda-result":
-                # timestamp_now = datetime.datetime.utcnow()
-                # timestamp_sent = datetime.datetime.strptime(time_sent_to_scheduler, "%Y-%m-%d %H:%M:%S.%f")
-                # self.task_execution_lengths[task_key] = message["execution_length"]
-                # self.start_end_times[task_key] = [message["start_time"], message["end_time"]]
-                # time_delta = timestamp_now - timestamp_sent
-                # self.timedeltas_from_lambda.append(time_delta)
-            #print("[ {} ] Scheduler - INFO: Received valid result from DAG root-level task node {}.".format(datetime.datetime.utcnow(), task_key))
-            #print("\tOp: {}, Task Key: {}, Execution Length: {}, Msg: {}".format(op, task_key, execution_length, msg))
+        if op == LAMBDA_RESULT_KEY:
+            self.num_results_received_from_lambda = self.num_results_received_from_lambda + 1
+            if self.print_debug == True:
+                print("\n[ {} ] Received result from Lambda for task {}.".format(datetime.datetime.utcnow(), task_key))
+                print("\tExecution Time: {} seconds".format(msg["execution-time"]))
+                print("\t{} of {} tasks of current job completed.".format(self.last_job_counter, len(self.last_job_tasks)))
+                print("\tTime Sent:", datetime.datetime.fromtimestamp(time_sent).isoformat())
+                print("\t\tTotal # messages received from Lambda:", self.num_messages_received_from_lambda)                 
+                print("\t\tTotal # results received from Lambda:", self.num_results_received_from_lambda, "\n")
+            self.obtained_valid_result_from_lambda(task_key = task_key, **msg)    
+            # We only keep track of this information if debug mode is enabled.
+            if self.debug_mode and task_key not in self.executed_tasks:
+                self.executed_tasks.append(task_key)
+        elif op == EXECUTING_TASK_KEY:
+            # We only keep track of this information if debug mode is enabled.
+            if self.debug_mode:
+                self.executing_tasks[task_key] = True
+
+            # Avoid an invalid key exception by checking first. If key exists, update state and metadata of corresponding task.
+            if task_key in self.tasks:
+                self.tasks[task_key].state = "processing" 
+                self.executing_tasks_counters[task_key] = self.executing_tasks_counters[task_key] + 1
+                if self.print_debug:
+                    print("\n[DEBUG - {}] Task {} began execution on Lambda {}.".format(datetime.datetime.utcnow(), task_key, lambda_id))   
+                    if time_sent is not None:
+                        print("\tTime Sent: {}".format(datetime.datetime.fromtimestamp(time_sent).isoformat()))             
+            elif self.print_debug and self.print_level <= 2:
+                print("[WARNING] Got notification that Task {} began executing on Lambda, but no entry for said task exists in self.tasks...".format(task_key))
+            #self.transition_waiting_processing_lambda(task_key)
+        elif op == EXECUTED_TASK_KEY:
+            self.last_job_counter += 1
+            self.executed_tasks.append(task_key)
+            # Record that we've completed the task.
+            self.completed_tasks[task_key] = True
+            self.completed_task_counts[task_key] = self.completed_task_counts[task_key] + 1
+            self.executing_tasks[task_key] = False
+            #if task_key in self.tasks:
+            #    self.tasks[task_key].state = "released"
+            ##else:
+            #    print("[WARNING] Got notification that Task {} finished execution on Lambda, but no entry for said task exists in self.tasks...".format(task_key))
+            # If there already exists an entry for this task, then print a 'WARNING' message indicating this. 
+            # We record all entries (not just the first) in the dictionary. Otherwise, just add an entry for the executed task.
+            if task_key in self.completed_task_data:
+                if type(self.completed_task_data[task_key]) is list:
+                    self.completed_task_data[task_key].append({
+                                                        "start": msg['start-time'],
+                                                        "stop": msg['stop-time'],
+                                                        "execution-time": msg['execution-time'],
+                                                        "lambda-id": lambda_id,
+                                                        "task-key": task_key,
+                                                        DATA_SIZE: msg[DATA_SIZE],
+                                                        "time_sent": time_sent,
+                                                        })
+                    if self.print_debug:
+                        print("\n\n[WARNING] Task {} has now been executed {} times by AWS Lambda!\n".format(task_key, len(self.completed_task_data[task_key])))
+                else:
+                    prev_entry = self.completed_task_data[task_key]
+                    new_entry = {
+                            "start": msg['start-time'],
+                            "stop": msg['stop-time'],
+                            "execution-time": msg['execution-time'],
+                            "lambda-id": lambda_id,
+                            "task-key": task_key,
+                            "time_sent": time_sent,
+                        }
+                    lst = [prev_entry, new_entry]
+                    self.completed_task_data[task_key] = lst 
+                    if self.print_debug:
+                        print("\n\n[WARNING] Task {} has now been executed 2 times by AWS Lambda!\n".format(task_key))
+            else:        
+                self.completed_task_data[task_key] = {
+                                "start": msg['start-time'],
+                                "stop": msg['stop-time'],
+                                "execution-time": msg['execution-time'],
+                                "lambda-id": lambda_id,
+                                "task-key": task_key,
+                                "time_sent": time_sent,
+                            }
             self.obtained_valid_result_from_lambda(task_key = task_key, **msg)
-        elif op == "task-erred":
-            self.handle_task_erred_lambda(key = task_key, exception = message["exception"], traceback = message["traceback"])
+            if self.print_debug:
+                print("[DEBUG - {}] Task {} has been executed successfully by Lambda {}.\n\tStart Time: {}\n\tStop Time: {}\n\tExecution Time: {} seconds.\n\t{} of {} tasks of last job completed\n\tTime Sent: {}\n".format(
+                                                                                                                                                datetime.datetime.utcnow(),
+                                                                                                                                                task_key, 
+                                                                                                                                                lambda_id,
+                                                                                                                                                datetime.datetime.fromtimestamp(msg['start-time']).isoformat(),
+                                                                                                                                                datetime.datetime.fromtimestamp(msg['stop-time']).isoformat(),
+                                                                                                                                                msg['execution-time'],
+                                                                                                                                                self.last_job_counter,
+                                                                                                                                                len(self.last_job_tasks),
+                                                                                                                                                datetime.datetime.fromtimestamp(time_sent).isoformat()))
+        elif op == TASK_ERRED_KEY:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!\n[TASK ERROR - {}] The execution of task {} resulted in an error. Start time: {}. Lambda ID: {}. Actual Exception: {}.\n\tTime Sent: {}\n".format(datetime.datetime.utcnow(), task_key,
+                                                                                                                                              lambda_id,
+                                                                                                                                              datetime.datetime.fromtimestamp(msg['start-time']).isoformat(),
+                                                                                                                                              msg["actual-exception"],
+                                                                                                                                              datetime.datetime.fromtimestamp(time_sent).isoformat())) 
+            if task_key in self.tasks:
+                self.tasks[task_key].state = "erred"                                                                                                                               
+            else:
+                print("[WARNING] Received error message for execution of task {} from Lambda, but there is no entry for this task in self.tasks...".format(task_key))
         else:
-            print("ERROR: Unknown operation for result from lambda: {}".format(message["op"]))               
+            raise ValueError("Unknown operation '{}' included in message from Lambda {}".format(op, lambda_id))
+        
+        time_diff = pythontime.time() - time_sent
+        if time_diff >= 5:
+            print("\n\n[WARNING] Long time difference between msg sent by Lambda and received by Scheduler: {} seconds\n\n".format(time_diff))
          
-    def get_lambdag_metrics(self):
-        task_metrics = self.redis_clients[0].lrange("task_breakdowns", 0, -1)
-        lambda_metrics = self.redis_clients[0].lrange("lambda_durations", 0, -1)
+    def get_wukong_metrics(self):
+        task_metrics = self.dcp_redis.lrange(TASK_BREAKDOWNS, 0, -1)
+        lambda_metrics = self.dcp_redis.lrange(LAMBDA_DURATIONS, 0, -1)
 
         task_metrics = [cloudpickle.loads(res) for res in task_metrics]
         lambda_metrics = [cloudpickle.loads(res) for res in lambda_metrics]
 
         return {"task-metrics": task_metrics, "lambda-metrics": lambda_metrics}
     
-    def reset_lambdag_metrics(self):
-        self.redis_clients[0].delete("task_breakdowns")
-        self.redis_clients[0].delete("lambda_durations")
+    # def small_redis_statistics(self, n = 1000000):
+    #     units = ""
+    #     if n == 1:
+    #         units = "bytes"
+    #     elif n == 1000:
+    #         units = "KB"
+    #     elif n == 1000000:
+    #         units = "MB"
+    #     elif n == 1000000000:
+    #         units = "GB"
+    #     elif n == 1000000000000:
+    #         units = "TB"
+    #     else:
+    #         raise  ValueError("Improper value for n")
+            
+    #     small_clients_memory_usage = []
+    #     total_commands = []
+    #     total_connections = []
+    #     small_infos = []
+    #     command_stats = dict()
+    #     command_stat_keys = ["cmdstat_info", "cmdstat_exists", "cmdstat_flushall", "cmdstat_mget", "cmdstat_get", "cmdstat_mset", "cmdstat_set"]
+    #     command_stats_formatted = dict()
+    #     counter = 1
+
+    #     for client in self.small_redis_clients:
+    #         data = client.info()
+    #         cmd_data = client.info("commandstats")
+    #         command_stats[counter] = cmd_data
+    #         small_infos.append(data)
+    #         small_clients_memory_usage.append(data["used_memory"] / n)   
+    #         total_connections.append(data["total_connections_received"])
+    #         total_commands.append(data["total_commands_processed"])
+    #         line_str = ""
+    #         for key in command_stat_keys:
+    #             if key in cmd_data:
+    #                 line_str = line_str + str(cmd_data[key]['calls']) + ","
+    #             else:
+    #                 line_str = line_str + "0,"
+    #         command_stats_formatted[counter] = line_str
+    #         counter = counter + 1        
+
+        
+    #     x1 = np.array(small_clients_memory_usage)
+    #     x2 = np.array(total_commands)
+    #     x3 = np.array(total_connections)
+
+    #     return ({"varience of mem used": str(np.var(x1)) + units + "^2", 
+    #             "standard-deviation of mem used": str(np.std(x1)) + units, 
+    #             "mean mem used": str(np.mean(x1)) + units,
+    #             "min mem used": str(np.min(x1)) + units,
+    #             "max mem used": str(np.max(x1)) + units,
+    #             "range mem used": str(np.max(x1) - np.min(x1)) + units,
+    #             "avg conn received": str(np.mean(x3)) + " connections",
+    #             "min conn received": str(np.min(x3)) + " connections",
+    #             "max conn received": str(np.max(x3)) + " connections",
+    #             "avg commands executed": str(np.mean(x2)) + " commands",
+    #             "min commands executed": str(np.min(x2)) + " commands",
+    #             "max commands executed": str(np.max(x2)) + " commands"}, small_clients_memory_usage, command_stats_formatted, command_stats)
+
+    def check_status_of_task_debug(self, task_key, print_all = False):
+        """ Check the status of an individual task. 
+
+            print_all :: bool : If True, this will recursively print all dependencies of all waiting tasks, not just the task specified by 'task_key'.
+            
+            If a value for 'max_layers' is given, then this will only print dependencies for that many layers deep."""
+        if (not self.lambda_debug):
+            raise RuntimeError("Lambda Debugging is not enabled. Cannot retrieve debug information.")
+        
+        if self.executing_tasks[task_key] == True:
+            return "Task {} is currently executing.".format(task_key)
+        elif self.completed_tasks[task_key] == True:
+            return "Task {} finished executing.".format(task_key)
+        else:
+            # TODO: Iterate over dependencies, check which are done and which aren't done. Return this information to user.
+            return_msg = "Task {} has not started executing yet.".format(task_key)
+            ts = self.tasks[task_key]
+            dependencies = ts.dependencies
+            for task_state in dependencies:
+                dependency_key = task_state.key
+                if self.executing_tasks[dependency_key] == True:
+                    return_msg = return_msg + "\t\n{} - EXECUTION IN PROGRESS".format(dependency_key)
+                elif self.completed_tasks[dependency_key] == True:
+                    return_msg = return_msg + "\t\n{} - COMPLETED".format(dependency_key)
+                else:
+                    return_msg = return_msg + "\t\n{} - WAITING".format(dependency_key)
+                    if (print_all):
+                        raise NotImplementedError("Haven't implemented print_all feature yet.")
+            return return_msg
+        
+    def check_status_of_tasks(self):
+        """ Checks which tasks from the last-submitted job are done and which are not done.
+
+            For the tasks that are not done, this also returns how many of their dependencies have been resolved."""
+        print("[SCHEDULER] Checking status of last job. Need to check {} tasks.".format(len(self.last_job_tasks)))
+        # Get current timestamp.
+        _now = datetime.datetime.utcnow()        
+        
+        complete = list()
+        incomplete = list()
+        waiting_on = dict()
+        timeouts = list()
+
+        counter = 1
+        for task_node, payload in self.last_job_tasks:
+            task_key = task_node.task_key 
+            if self.print_debug:
+                print("[INFO] Processing status for task {} ({}/{}).".format(task_key, counter, len(self.last_job_tasks)))
+            
+            if self.completed_tasks[task_key] == True:
+                _payload = payload.copy()
+                _payload["function"] = None
+                _payload["args"] = None
+                complete.append((task_node, _payload))
+                continue
+            
+            #fargate_ip = task_node.fargate_node[FARGATE_PUBLIC_IP_KEY] 
+            fargate_ip = task_node.fargate_node[FARGATE_PRIVATE_IP_KEY] 
+            redis_client = redis.StrictRedis(host = fargate_ip, port = 6379, db = 0, socket_connect_timeout  = 5, socket_timeout = 5)
+            val = 0
+            try:
+                val = redis_client.exists(task_key)
+            except Exception as ex:
+                exception_type = type(ex)
+                print("{} when attempting to check if value for key {} exists at Redis instance {}:6379. ARN: {}".format(exception_type, task_key, fargate_ip, task_node.fargate_node[FARGATE_ARN_KEY]))
+                timeouts.append(task_node)
+                continue 
+            if val == 0:
+                # Remove the function/args entries as they will just be serialized nonsense.
+                _payload = payload.copy()
+                _payload["function"] = None
+                _payload["args"] = None                    
+                incomplete.append((task_node, _payload))
+                dep_counter = task_key + DEPENDENCY_COUNTER_SUFFIX
+                remaining = self.dcp_redis.get(dep_counter).decode()
+                total = len(payload["dependencies"])
+                waiting_on[task_key] = (remaining, total)
+            else:
+                # Remove the function/args entries as they will just be serialized nonsense.
+                _payload = payload.copy()
+                _payload["function"] = None
+                _payload["args"] = None
+                complete.append((task_node, _payload))
+            counter = counter + 1
+        
+        print("[SCHEDULER] {}/{} of the tasks in the last workload have finished executing.".format(len(complete), len(self.last_job_tasks)))
+        print("Additionally, there were {} timeouts.".format(len(timeouts)))
+        return {
+            "completed-tasks": complete,
+            "incomplete-tasks": incomplete,
+            "timeouts": timeouts,
+            "dependency-counter-values": waiting_on
+        }
+
+    # def big_redis_statistics(self, n = 1000000):
+    #     units = ""
+    #     if n == 1:
+    #         units = "bytes"
+    #     elif n == 1000:
+    #         units = "KB"
+    #     elif n == 1000000:
+    #         units = "MB"
+    #     elif n == 1000000000:
+    #         units = "GB"
+    #     elif n == 1000000000000:
+    #         units = "TB"
+    #     else:
+    #         raise  ValueError("Improper value for n")
+
+    #     big_clients_memory_usage = []
+    #     big_infos = []
+    #     total_commands = []
+    #     total_connections = []        
+    #     command_stats = dict()
+    #     command_stat_keys = ["cmdstat_info", "cmdstat_exists", "cmdstat_flushall", 
+    #                             "cmdstat_mget", "cmdstat_get", "cmdstat_mset", "cmdstat_set", 
+    #                                 "cmdstat_lpush", "cmdstat_subscribe", "cmdstat_incrby", "cmdstat_publish"]
+    #     command_stats_formatted = dict()
+    #     counter = 1
+
+    #     command_stats_formatted["keys"] = "'cmdstat_info', 'cmdstat_exists', 'cmdstat_flushall', 'cmdstat_mget', 'cmdstat_get', 'cmdstat_mset', 'cmdstat_set', 'cmdstat_lpush', 'cmdstat_subscribe', 'cmdstat_incrby', 'cmdstat_publish'"
+
+    #     for client in self.big_redis_clients:
+    #         data = client.info()
+    #         cmd_data = client.info("commandstats")
+    #         command_stats[counter] = cmd_data
+    #         big_infos.append(data)
+    #         big_clients_memory_usage.append(data["used_memory"] / n)
+    #         total_connections.append(data["total_connections_received"])
+    #         total_commands.append(data["total_commands_processed"])  
+    #         line_str = ""
+    #         for key in command_stat_keys:
+    #             if key in cmd_data:
+    #                 line_str = line_str + str(cmd_data[key]['calls']) + ","
+    #             else:
+    #                 line_str = line_str + "0,"
+    #         command_stats_formatted[counter] = line_str
+    #         counter = counter + 1                        
+        
+    #     x1 = np.array(big_clients_memory_usage)
+    #     x2 = np.array(total_commands)
+    #     x3 = np.array(total_connections)
+
+    #     return ({"varience of mem used": str(np.var(x1)) + units + "^2",  
+    #             "standard-deviation of mem used": str(np.std(x1)) + units, 
+    #             "mean mem used": str(np.mean(x1)) + units,
+    #             "min mem used": str(np.min(x1)) + units,
+    #             "max mem used": str(np.max(x1)) + units,
+    #             "range mem used": str(np.max(x1) - np.min(x1)) + units,
+    #             "avg conn received": str(np.mean(x3)) + " connections",
+    #             "min conn received": str(np.min(x3)) + " connections",
+    #             "max conn received": str(np.max(x3)) + " connections",
+    #             "avg commands executed": str(np.mean(x2)) + " commands",
+    #             "min commands executed": str(np.min(x2)) + " commands",
+    #             "max commands executed": str(np.max(x2)) + " commands"}, big_clients_memory_usage, command_stats_formatted, command_stats)     
+
+    def workload_finished(self):
+        """
+            The function resets data in Redis and locally that is used during a workload to track the progress of the workload and whatnot.
+
+            The data would potentially cause issues if not reset and we were to encounter tasks with the same keys and whatnot.
+        """
+        mapping = dict()
+        for key, b in self.seen_leaf_tasks.items():
+            mapping[key] = -1 # This tells all Lambdas to stop. They'll set the value to 'zero' for us.
+
+        if len(mapping) > 0:
+            print("Setting all seen-leaf-task interation counters to -1.")
+            # Reset all counters. It's possible we could use the same keys again,
+            # particularly if the users are seeding the RNG or using the same input data.
+            self.dcp_redis.mset(mapping)
+
+        # Clear this.
+        self.seen_leaf_tasks = dict()
+
+    def reset_wukong_metrics(self, task_breakdowns = True, lambda_durations = True, fan_in_data = True, fan_out_data = True):
+        """Clear the data stored at keys corresponding to Wukong metrics on the Redis instance."""
+        if task_breakdowns:
+            self.dcp_redis.delete(TASK_BREAKDOWNS)
+        if lambda_durations:
+            self.dcp_redis.delete(LAMBDA_DURATIONS)
+        if fan_in_data:
+            self.dcp_redis.delete("fan-in-data")
+        if fan_out_data:
+            self.dcp_redis.delete("fan-out-data")
         return True 
+    
+    def reset_fargate_metrics(self, full_clear = False):
+        """ Clear the fargate_metrics dictionary by setting all values to default (most likely 0).
+
+            Args:
+                full_clear (bool): If True, then this will clear out the keys of the fargate_metrics dictionary entirely.
+        """
+        if full_clear:
+            if self.print_debug:
+                print("[WARNING] Scheduler is clearing fargate_metrics dictionary...")
+            self.fargate_metrics.clear()
+        else:
+            if self.print_debug:
+                print("[WARNING] Scheduler is clearing entries for fargate_metrics (not getting rid of keys, just resetting all values to default).")
+            for key in self.fargate_metrics:
+                # Reset this to default value of 0.
+                self.fargate_metrics[key][FARGATE_NUM_SELECTED] = 0
 
     @gen.coroutine 
     def handle_redis_proxy_channels(self, num_channels, base_name, **msg):
@@ -3096,7 +4408,7 @@ class Scheduler(ServerNode):
         self.current_redis_proxy_channel_index = 0
         self.num_redis_proxy_channels = num_channels
         # yield self.handle_stream(comm = self.proxy_comm)
-            
+
     def result_from_lambda_centralized(self, comm, messages, time_received_from_scheduler, time_sent_to_scheduler, lambda_length = None, **msg):  
         """ Handle the result from executing a task on AWS Lambda. """
         self.num_messages_received_from_lambda = self.num_messages_received_from_lambda + 1
@@ -3118,24 +4430,11 @@ class Scheduler(ServerNode):
                 self.handle_task_erred_lambda(key = task_key, exception = message["exception"], traceback = message["traceback"])
             else:
                 print("ERROR: Unknown operation for result from lambda: {}".format(message["op"]))
-    
+
     def handle_debug_message2(self, message):
         """ Print a message received from some remote object (probably AWS Lambda) """
         timestamp_now = datetime.datetime.utcnow()
         print("[{}]    {}".format(timestamp_now, message))
-
-    ##def print_lambda_diagnostic_info(self):
-    ##    if self.batched_lambda_invoker.total_lambdas_invoked == 0:
-    ##        return 
-    ##    timestamp_now = datetime.datetime.utcnow()
-    ##    keys_in_elasticache = self.redis_client1.dbsize() + self.redis_client2.dbsize()
-    ##    num_sent = self.redis_client1.get("num-sent").decode('utf-8') + self.redis_client2.get("num-sent").decode('utf-8')
-    ##    print("[{}] Lambda Debug Information:".format(timestamp_now))
-    ##    print("   Number of Keys in Elasticache: ", keys_in_elasticache)
-    ##    print("   Number of Lambdas Invoked: ", self.batched_lambda_invoker.total_lambdas_invoked)
-    ##    print("   Number of Messages Sent by Lambda: ", num_sent)
-    ##    print("   Number of Messages Received from Lambda: ", self.num_messages_received_from_lambda)
-    ##    print("      Difference: ", str(int(num_sent) - self.num_messages_received_from_lambda), "\n")
         
     def obtained_valid_result_from_lambda(self, task_key, **msg):
         validate_key(task_key)
@@ -3294,6 +4593,15 @@ class Scheduler(ServerNode):
     # Less common interactions #
     ############################
 
+    @gen.coroutine
+    def get_fargate_info_for_task(self, comm = None, keys = None):
+        keys = list(keys)
+        result = {}
+        for key in keys:
+            result[key] = self.tasks_to_fargate_nodes[key]
+            
+        raise gen.Return(result)
+    
     @gen.coroutine
     def scatter(
         self,
@@ -4325,30 +5633,31 @@ class Scheduler(ServerNode):
         #ws.has_what.add(ts)
         #ws.nbytes += ts.get_nbytes()
         #print("Adding task {} to memory.".format(ts.key))
-        deps = ts.dependents
-        if len(deps) > 1:
-            deps = sorted(deps, key=operator.attrgetter("priority"), reverse=True)
-        for dts in deps:
-            s = dts.waiting_on
-            if ts in s:
-                s.discard(ts)
-                if not s:  # new task ready to run
-                    recommendations[dts.key] = "processing"
+        #deps = ts.dependents
+        #if len(deps) > 1:
+        #    deps = sorted(deps, key=operator.attrgetter("priority"), reverse=True)
+        #for dts in deps:
+        #    s = dts.waiting_on
+        #    if ts in s:
+        #        s.discard(ts)
+        #        if not s:  # new task ready to run
+        #            recommendations[dts.key] = "processing"
 
-        for dts in ts.dependencies:
-            s = dts.waiters
-            s.discard(ts)
-            if not s and not dts.who_wants:
-                recommendations[dts.key] = "released"
+        #for dts in ts.dependencies:
+        #    s = dts.waiters
+        #    s.discard(ts)
+        #    if not s and not dts.who_wants:
+        #        recommendations[dts.key] = "released"
 
-        if not ts.waiters and not ts.who_wants:
-            print("Recommending released for task {}".format(ts.key))
-            recommendations[ts.key] = "released"
-        else:
-            msg = {"op": "key-in-memory", "key": ts.key}
-            if type is not None:
-                msg["type"] = type
-            self.report(msg)
+        #if not ts.waiters and not ts.who_wants:
+        #    print("Recommending released for task {}".format(ts.key))
+        #    recommendations[ts.key] = "released"
+        recommendations[ts.key] = "memory"
+        #else:
+        msg = {"op": "key-in-memory", "key": ts.key}
+        if type is not None:
+            msg["type"] = type
+        self.report(msg)
 
         ts.state = "memory"
         ts.type = typename
@@ -4529,7 +5838,7 @@ class Scheduler(ServerNode):
 
             # Do both for now... eventually workers won't be involved.
             # self.send_task_to_worker(worker, key)
-            self.submit_task_to_lambda(key)
+            #self.submit_task_to_lambda(key)
             
             return {}
         except Exception as e:
@@ -4671,6 +5980,7 @@ class Scheduler(ServerNode):
             raise
 
     def transition_memory_released(self, key, safe=False):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_memory_released"))
         try:
             ts = self.tasks[key]
 
@@ -4770,6 +6080,7 @@ class Scheduler(ServerNode):
             raise
 
     def transition_erred_released(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_erred_released"))
         try:
             ts = self.tasks[key]
 
@@ -4804,6 +6115,7 @@ class Scheduler(ServerNode):
             raise
 
     def transition_waiting_released(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_waiting_released"))
         try:
             ts = self.tasks[key]
 
@@ -4840,6 +6152,7 @@ class Scheduler(ServerNode):
             raise
 
     def transition_processing_released(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_processing_released"))
         try:
             ts = self.tasks[key]
 
@@ -4951,6 +6264,7 @@ class Scheduler(ServerNode):
             raise
 
     def transition_no_worker_released(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_no_worker_released"))
         try:
             ts = self.tasks[key]
 
@@ -4980,6 +6294,7 @@ class Scheduler(ServerNode):
     # Serverless Dask
     #
     def transition_released_waiting_lambda(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_released_waiting_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5012,7 +6327,9 @@ class Scheduler(ServerNode):
                 #    ts.waiting_on.add(dts)
                 #if self.get_redis_client(dts.key).exists(dts.key) == 0:
                 #    ts.waiting_on.add(dts)
-                if self.hash_ring[dts.key].exists(dts.key) == 0:
+                # Check both the big and small hash rings.
+                #if self.big_hash_ring[dts.key].exists(dts.key) == 0 and self.small_hash_ring[dts.key].exists(dts.key) == 0:
+                if self.dcp_redis.exists(dts.key) == 0:
                     ts.waiting_on.add(dts)
                 if dts.state == "released":
                     recommendations[dep] = "waiting"
@@ -5040,6 +6357,7 @@ class Scheduler(ServerNode):
             raise    
     
     def transition_no_worker_waiting_lambda(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_no_worker_waiting_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5063,7 +6381,8 @@ class Scheduler(ServerNode):
                     # ts.waiting_on.add(dts)        
                 #if self.get_redis_client(dts.key).exists(dts.key) == 0:
                 #    ts.waiting_on.add(dts)     
-                if self.hash_ring[dts.key].exists(dts.key) == 0:
+                #if self.big_hash_ring[dts.key].exists(dts.key) == 0 and self.small_hash_ring[dts.key].exists(dts.key) == 0:
+                if self.dcp_redis.exists(dts.key) == 0:
                     ts.waiting_on.add(dts)
                 # if not dts.who_has:
                     # ts.waiting_on.add(dep)
@@ -5093,6 +6412,7 @@ class Scheduler(ServerNode):
             raise    
     
     def transition_waiting_processing_lambda(self, key):
+        #print("\n\n\n\n{}\n\n\n\n".format("transition_waiting_processing_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5123,42 +6443,14 @@ class Scheduler(ServerNode):
             raise
         
     def transition_waiting_memory_lambda(self, key, nbytes=None, **kwargs):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_waiting_memory_lambda"))
         try:
             ts = self.tasks[key]
-            #assert worker
-            #assert isinstance(worker, (str, unicode))
 
             if self.validate:
-                #assert ts.processing_on
-                #ws = ts.processing_on
-                #assert ts in ws.processing
                 assert not ts.waiting_on
-                #assert not ts.who_has, (ts, ts.who_has)
                 assert not ts.exception_blame
                 assert ts.state == "processing"
-
-            #ws = self.workers.get(worker)
-            #if ws is None:
-            #    return {key: "released"}
-
-            #if ws is not ts.processing_on:  # someone else has this task
-            #    logger.info(
-            #        "Unexpected worker completed task, likely due to"
-            #        " work stealing.  Expected: %s, Got: %s, Key: %s",
-            #        ts.processing_on,
-            #        ws,
-            #        key,
-            #    )
-            #    return {}
-
-            if startstops:
-                L = [(b, c) for a, b, c in startstops if a == "compute"]
-                if L:
-                    compute_start, compute_stop = L[0]
-                else:  # This is very rare
-                    compute_start = compute_stop = None
-            else:
-                compute_start = compute_stop = None
 
             #############################
             # Update Timing Information #
@@ -5192,9 +6484,6 @@ class Scheduler(ServerNode):
 
             recommendations = OrderedDict()
 
-            #self._remove_from_processing(ts)
-
-            #self._add_to_memory(ts, ws, recommendations, type=type, typename=typename)
             self._add_to_memory_lambda(ts, recommendations, type=type, typename=typename)
             
             if self.validate:
@@ -5218,6 +6507,7 @@ class Scheduler(ServerNode):
         typename=None,
         startstops=None,
         **kwargs):
+        #print("\n\n\n\n{}\n\n\n\n".format("transition_processing_memory_lambda"))
         try:
             ts = self.tasks[key]
             #assert worker
@@ -5231,20 +6521,6 @@ class Scheduler(ServerNode):
                 #assert not ts.who_has, (ts, ts.who_has)
                 assert not ts.exception_blame
                 assert ts.state == "processing"
-
-            #ws = self.workers.get(worker)
-            #if ws is None:
-            #    return {key: "released"}
-
-            #if ws is not ts.processing_on:  # someone else has this task
-            #    logger.info(
-            #        "Unexpected worker completed task, likely due to"
-            #        " work stealing.  Expected: %s, Got: %s, Key: %s",
-            #        ts.processing_on,
-            #        ws,
-            #        key,
-            #    )
-            #    return {}
 
             if startstops:
                 L = [(b, c) for a, b, c in startstops if a == "compute"]
@@ -5306,6 +6582,7 @@ class Scheduler(ServerNode):
             raise
         
     def transition_memory_released_lambda(self, key, safe=False):
+        #print("\n\n\n\n{}\n\n\n\n".format("transition_memory_released_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5405,6 +6682,7 @@ class Scheduler(ServerNode):
             raise
         
     def transition_erred_released_lambda(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_erred_released_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5439,6 +6717,7 @@ class Scheduler(ServerNode):
             raise
         
     def transition_waiting_released_lambda(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_waiting_released_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5475,6 +6754,7 @@ class Scheduler(ServerNode):
             raise
         
     def transition_processing_released_lambda(self, key):
+        #print("\n\n{}\n\n".format("transition_processing_released_lambda for key: {}".format(key)))
         try:
             ts = self.tasks[key]
 
@@ -5586,6 +6866,7 @@ class Scheduler(ServerNode):
             raise
         
     def transition_no_worker_released_lambda(self, key):
+        print("\n\n\n\n{}\n\n\n\n".format("transition_no_worker_released_lambda"))
         try:
             ts = self.tasks[key]
 
@@ -5893,7 +7174,9 @@ class Scheduler(ServerNode):
             if self.plugins:
                 dependents = set(ts.dependents)
                 dependencies = set(ts.dependencies)
-
+            
+            #if self.print_debug:
+            #    print("Scheduler.transition() -- Task: {} Start: {}, Finish: {}".format(key, start, finish))
             if (start, finish) in self._transitions:
                 func = self._transitions[start, finish]
                 recommendations = func(key, *args, **kwargs)
