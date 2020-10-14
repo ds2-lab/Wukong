@@ -2,10 +2,10 @@
 
 A fast and efficient serverless DAG engine.
 
-Paper: In Search of a Fast and Efficient Serverless DAG Engine
+Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
 https://arxiv.org/abs/1910.05896
 
-This branch contains the version of Wukong used during the writing of the paper linked above. For the latest work-in-progress version of Wukong, please see the [Latest](https://github.com/Scusemua/Wukong/tree/latest) branch.
+This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the paper referenced above.
 
 ## What is Wukong?
 
@@ -104,15 +104,9 @@ v.compute()
 ```python
 import dask.array as da
 from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host = "ec2-203-0-113-25.compute-1.amazonaws.com:8786",
-                             n_workers = 0,
-                             proxy_address = "ec2-204-0-113-25.compute-1.amazonaws.com",
-                             proxy_port = 8989,
-                             redis_endpoints = [("ec2-205-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-206-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-207-0-113-25.compute-1.amazonaws.com", 6379)],
-                             num_lambda_invokers = 10,
-                             max_task_fanout = 10)
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  num_fargate_nodes = 10) 
 client = Client(local_cluster)
 
 # Compute the SVD of 'Tall-and-Skinny' Matrix 
@@ -128,15 +122,9 @@ v.compute()
 from dask import delayed 
 import operator 
 from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host = "ec2-203-0-113-25.compute-1.amazonaws.com:8786",
-                             n_workers = 0,
-                             proxy_address = "ec2-204-0-113-25.compute-1.amazonaws.com",
-                             proxy_port = 8989,
-                             redis_endpoints = [("ec2-205-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-206-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-207-0-113-25.compute-1.amazonaws.com", 6379)],
-                             num_lambda_invokers = 10,
-                             max_task_fanout = 10)
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  num_fargate_nodes = 10) 
 client = Client(local_cluster)
 
 L = range(1024)
@@ -151,15 +139,9 @@ L[0].compute()
 ``` python
 import dask.array as da
 from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host = "ec2-203-0-113-25.compute-1.amazonaws.com:8786",
-                             n_workers = 0,
-                             proxy_address = "ec2-204-0-113-25.compute-1.amazonaws.com",
-                             proxy_port = 8989,
-                             redis_endpoints = [("ec2-205-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-206-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-207-0-113-25.compute-1.amazonaws.com", 6379)],
-                             num_lambda_invokers = 10,
-                             max_task_fanout = 10)
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  num_fargate_nodes = 10) 
 client = Client(local_cluster)
 
 x = da.random.random((10000, 10000), chunks = (1000, 1000))
@@ -180,15 +162,9 @@ from sklearn.svm import SVC
 import dask_ml.datasets
 from dask_ml.wrappers import ParallelPostFit
 from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host = "ec2-203-0-113-25.compute-1.amazonaws.com:8786",
-                             n_workers = 0,
-                             proxy_address = "ec2-204-0-113-25.compute-1.amazonaws.com",
-                             proxy_port = 8989,
-                             redis_endpoints = [("ec2-205-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-206-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-207-0-113-25.compute-1.amazonaws.com", 6379)],
-                             num_lambda_invokers = 10,
-                             max_task_fanout = 10)
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  num_fargate_nodes = 10) 
 client = Client(local_cluster)
 
 X, y = sklearn.datasets.make_classification(n_samples=1000)
