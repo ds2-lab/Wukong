@@ -4,7 +4,6 @@ import traceback
 import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop
-from contextlib import contextmanager
 import os
 
 msgpack_opts = {
@@ -17,6 +16,72 @@ if sys.version_info[0] == 2:
 if sys.version_info[0] == 3:
    PY3 = True 
    PY2 = False 
+
+def key_split(s):
+    """
+    >>> key_split('x')
+    'x'
+    >>> key_split('x-1')
+    'x'
+    >>> key_split('x-1-2-3')
+    'x'
+    >>> key_split(('x-2', 1))
+    'x'
+    >>> key_split("('x-2', 1)")
+    'x'
+    >>> key_split('hello-world-1')
+    'hello-world'
+    >>> key_split(b'hello-world-1')
+    'hello-world'
+    >>> key_split('ae05086432ca935f6eba409a8ecd4896')
+    'data'
+    >>> key_split('<module.submodule.myclass object at 0xdaf372')
+    'myclass'
+    >>> key_split(None)
+    'Other'
+    >>> key_split('x-abcdefab')  # ignores hex
+    'x'
+    >>> key_split('_(x)')  # strips unpleasant characters
+    'x'
+    """
+    if type(s) is bytes:
+        s = s.decode()
+    if type(s) is tuple:
+        s = s[0]
+    try:
+        words = s.split("-")
+        if not words[0][0].isalpha():
+            result = words[0].strip("_'()\"")
+        else:
+            result = words[0]
+        for word in words[1:]:
+            if word.isalpha() and not (
+                len(word) == 8 and hex_pattern.match(word) is not None
+            ):
+                result += "-" + word
+            else:
+                break
+        if len(result) == 32 and re.match(r"[a-f0-9]{32}", result):
+            return "data"
+        else:
+            if result[0] == "<":
+                result = result.strip("<>").split()[0].split(".")[-1]
+            return result
+    except Exception:
+        return "Other"
+
+def typename(typ):
+    """ Return name of type
+    Examples
+    --------
+    >>> from distributed import Scheduler
+    >>> typename(Scheduler)
+    'distributed.scheduler.Scheduler'
+    """
+    try:
+        return typ.__module__ + "." + typ.__name__
+    except AttributeError:
+        return str(typ)
 
 def has_keyword(func, keyword):
    if PY3:
@@ -44,14 +109,7 @@ def funcname(func):
    try:
       return func.__name__
    except AttributeError:
-      return str(func)      
-
-@contextmanager
-def ignoring(*exceptions):
-   try:
-      yield
-   except exceptions as e:
-      pass   
+      return str(func) 
    
 # TODO: Implement exception handling/reporting (i.e. the following commented-out methods...)   
   
@@ -77,40 +135,4 @@ def get_traceback():
       b in exc_traceback.tb_frame.f_code.co_filename for b in bad
    ):
       exc_traceback = exc_traceback.tb_next
-   return exc_traceback   
-   
-def error_message(e, status="error"):
-   """ Produce message to send back given an exception has occurred
-
-   This does the following:
-
-   1.  Gets the traceback
-   2.  Truncates the exception and the traceback
-   3.  Serializes the exception and traceback or
-   4.  If they can't be serialized send string versions
-   5.  Format a message and return
-
-   See Also
-   --------
-   clean_exception: deserialize and unpack message into exception/traceback
-   six.reraise: raise exception/traceback
-   """
-   tb = get_traceback()
-   e2 = truncate_exception(e, 1000)
-   try:
-      e3 = protocol_pickle_dumps(e2)
-      protocol_pickle_loads(e3)
-   except Exception:
-      e2 = Exception(str(e2))
-   e4 = to_serialize(e2)
-   try:
-      tb2 = protocol_pickle_dumps(tb)
-   except Exception:
-      tb = tb2 = "".join(traceback.format_tb(tb))
-
-   if len(tb2) > 10000:
-      tb_result = None
-   else:
-      tb_result = to_serialize(tb)
-
-   return {"status": status, "exception": e4, "traceback": tb_result, "text": str(e2)}     
+   return exc_traceback     
