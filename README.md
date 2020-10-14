@@ -11,7 +11,7 @@ This branch contains the source code of Wukong corresponding to the SoCC 2020 pu
 
 Wukong is a serverless DAG scheduler attuned to AWS Lambda. Wukong provides decentralized scheduling using a combination of static and dynamic scheduling. Wukong supports general Python data analytics workloads. 
 
-![Architecture](https://i.imgur.com/XjAsrVm.png "Wukong's Architecture")
+![Architecture](https://i.imgur.com/QDqMiFs.png "Wukong's Architecture")
 
 ## Code Overview/Explanation 
 
