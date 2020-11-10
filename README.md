@@ -83,15 +83,9 @@ LocalCluster(object):
 ```python
 import dask.array as da
 from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host = "ec2-203-0-113-25.compute-1.amazonaws.com:8786",
-                             n_workers = 0,
-                             proxy_address = "ec2-204-0-113-25.compute-1.amazonaws.com",
-                             proxy_port = 8989,
-                             redis_endpoints = [("ec2-205-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-206-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-207-0-113-25.compute-1.amazonaws.com", 6379)],
-                             num_lambda_invokers = 10,
-                             max_task_fanout = 10)
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  num_fargate_nodes = 10) 
 client = Client(local_cluster)
 
 # Compute the SVD of 'Tall-and-Skinny' Matrix 
