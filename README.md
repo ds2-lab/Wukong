@@ -7,7 +7,7 @@ https://arxiv.org/abs/1910.05896
 
 Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing (Appeared at SoCC '20) https://arxiv.org/abs/2010.07268
 
-This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the paper referenced above.
+This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the PDSW paper referenced above.
 
 ## What is Wukong?
 
