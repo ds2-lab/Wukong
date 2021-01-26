@@ -2,7 +2,7 @@
 
 A fast and efficient serverless DAG engine.
 
-Documentation: https://leap-wukong.readthedocs.io/en/latest/
+[![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
 
 First Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
 https://arxiv.org/abs/1910.05896
