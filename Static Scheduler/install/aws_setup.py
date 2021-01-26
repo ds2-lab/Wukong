@@ -52,7 +52,7 @@ def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
     logger.info("Creating VPC now...")
 
     # Create the VPC.
-    create_vpc_response = ec2_resource.create_vpc(CidrBlock = CidrBlock)
+    create_vpc_response = ec2_client.create_vpc(CidrBlock = CidrBlock)
     vpc = ec2_resource.Vpc(create_vpc_response["Vpc"]["VpcId"])
     vpc.wait_until_available()
 
@@ -87,7 +87,7 @@ def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
     logger.info("Next, creating an internet gateway...")
     
     # Create and attach an internet gateway.
-    create_internet_gateway_response = ec2_resource.create_internet_gateway()
+    create_internet_gateway_response = ec2_client.create_internet_gateway()
     internet_gateway_id = create_internet_gateway_response["InternetGateway"]["InternetGatewayId"]
     vpc.attach_internet_gateway(InternetGatewayId = internet_gateway_id)
 
@@ -101,7 +101,7 @@ def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
     logger.info("Next, creating route tables and associated public route table with public subnet...")
 
     # The VPC creates a route table, so we have one to begin with. We use this as the public route table.
-    initial_route_table = vpc.route_tables.all()[0] 
+    initial_route_table = list(vpc.route_tables.all())[0] 
     initial_route_table.create_route(
         DestinationCidrBlock = '0.0.0.0/0',
         GatewayId = internet_gateway_id
@@ -140,7 +140,7 @@ def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
 
     # The security group used by AWS EC2 and AWS Fargate instances/nodes.
     serverful_security_group = ec2_resource.create_security_group(
-        GroupName = serverful_security_group_name, VpcId = vpc.id)
+        Description='Wukong Security Group', GroupName = serverful_security_group_name, VpcId = vpc.id)
     
     #lambda_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
     serverful_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
@@ -261,13 +261,14 @@ def setup_aws_fargate(aws_region : str, wukong_ecs_config : dict):
 
     logger.info("First, creating the ECS Fargate cluster...")
 
-    ecs_client.create_cluster(clusterName = cluster_name, capacityProviders = ["FARGATE", "FARGATE SPOT"])
+    ecs_client.create_cluster(clusterName = cluster_name, capacityProviders = ["FARGATE", "FARGATE_SPOT"])
 
     logger.info("Successfully created the ECS Fargate cluster.")
     logger.info("Next, registering a task definition to use as the Fargate Redis nodes...")
 
     ecs_client.register_task_definition(
-        executionRoleArn = 'arn:aws:iam::561589293384:role/ecsTaskExecutionRole',
+        family = 'Wukong',
+        executionRoleArn = 'arn:aws:iam::833201972695:role/ecsTaskExecutionRole',
         networkMode = 'awsvpc',
         containerDefinitions = [
             {
