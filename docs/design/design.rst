@@ -4,6 +4,8 @@ Wukong Design
 .. toctree::
    architecture
 
+   core
+
 *******************
 Design Introduction
 *******************

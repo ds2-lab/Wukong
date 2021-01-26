@@ -2,8 +2,8 @@
 Example Code
 ============
 
-Getting Started
-===============
+Initialization Code
+===================
 
 Everytime you run a job on Wukong, you'll need to create an instance of the ``LocalCluster`` class as well as an instance of the ``Client`` class.
 
@@ -34,6 +34,7 @@ Here, we are computing the SVD of a 200,000 x 100 matrix. In this case, we parti
 
 .. code-block:: python 
     :linenos:
+
     X = da.random.random((200000, 100), chunks=(10000, 100)).persist()
     u, s, v = da.linalg.svd(X)
     v.compute()  
@@ -45,6 +46,7 @@ We can also compute the SVD of a square matrix -- in this case, the input matrix
 
 .. code-block:: python 
     :linenos:
+
     X = da.random.random((10000, 10000), chunks=(2000, 2000)).persist()
     u, s, v = da.linalg.svd_compressed(X, k=5)
     v.compute()  
@@ -95,11 +97,11 @@ General Matrix Multiplication (GEMM)
 .. code-block:: python 
     :linenos:
 
-   x = da.random.random((10000, 10000), chunks = (2000, 2000))
-   y = da.random.random((10000, 10000), chunks = (2000, 2000))    
-
-   z = da.matmul(x, y)
-   z.compute()
+    x = da.random.random((10000, 10000), chunks = (2000, 2000))
+    y = da.random.random((10000, 10000), chunks = (2000, 2000))    
+    
+    z = da.matmul(x, y)
+    z.compute()
 
 Machine Learning 
 ================
