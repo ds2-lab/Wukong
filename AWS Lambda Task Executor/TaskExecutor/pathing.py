@@ -189,10 +189,11 @@ class PathNode(object):
         if self.become is not None:
             become_str = become_str + "PathNode for " + self.become + ", "
         str = "[PathNode]\nTask Key: {}\n\t\tInvoke: [{}]\n\t\tBecome:".format(self.get_task_key(), invoke_str)
-        str = str + "[{}]\n\t\tFargate ARN: {}, Fargate ENI ID: {}, Fargate PublicIP: {}".format(become_str,
-                                                                                         self.fargate_node[FARGATE_ARN_KEY],
-                                                                                         self.fargate_node[FARGATE_ENI_ID_KEY],
-                                                                                         self.fargate_node[FARGATE_PUBLIC_IP_KEY])
+        if self.fargate_node is not None:
+            str = str + "[{}]\n\t\tFargate ARN: {}, Fargate ENI ID: {}, Fargate PublicIP: {}".format(become_str,
+                                                                                             self.fargate_node[FARGATE_ARN_KEY],
+                                                                                             self.fargate_node[FARGATE_ENI_ID_KEY],
+                                                                                             self.fargate_node[FARGATE_PUBLIC_IP_KEY])
         return str         
 
     def __str__(self):
@@ -204,8 +205,9 @@ class PathNode(object):
         if self.become is not None:
             become_str = become_str + "PathNode for " + self.become + ", "
         str = "[PathNode]\nTask Key: {}\n\t\tTask Payload: {}\n\t\tInvoke: [{}]\n\t\tBecome:".format(self.get_task_key(), self.task_payload, invoke_str)
-        str = str + "[{}]\n\t\tFargate ARN: {}, Fargate ENI ID: {}, Fargate PublicIP: {}".format(become_str,
-                                                                                         self.fargate_node[FARGATE_ARN_KEY],
-                                                                                         self.fargate_node[FARGATE_ENI_ID_KEY],
-                                                                                         self.fargate_node[FARGATE_PUBLIC_IP_KEY])
+        if self.fargate_node is not None:
+            str = str + "[{}]\n\t\tFargate ARN: {}, Fargate ENI ID: {}, Fargate PublicIP: {}".format(become_str,
+                                                                                             self.fargate_node[FARGATE_ARN_KEY],
+                                                                                             self.fargate_node[FARGATE_ENI_ID_KEY],
+                                                                                             self.fargate_node[FARGATE_PUBLIC_IP_KEY])
         return str 

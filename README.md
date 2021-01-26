@@ -2,10 +2,12 @@
 
 A fast and efficient serverless DAG engine.
 
-Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
+First Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
 https://arxiv.org/abs/1910.05896
 
-This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the paper referenced above.
+Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing (Appeared at SoCC '20) https://arxiv.org/abs/2010.07268
+
+This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the PDSW paper referenced above.
 
 ## What is Wukong?
 
@@ -81,15 +83,9 @@ LocalCluster(object):
 ```python
 import dask.array as da
 from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host = "ec2-203-0-113-25.compute-1.amazonaws.com:8786",
-                             n_workers = 0,
-                             proxy_address = "ec2-204-0-113-25.compute-1.amazonaws.com",
-                             proxy_port = 8989,
-                             redis_endpoints = [("ec2-205-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-206-0-113-25.compute-1.amazonaws.com", 6379),
-                                                ("ec2-207-0-113-25.compute-1.amazonaws.com", 6379)],
-                             num_lambda_invokers = 10,
-                             max_task_fanout = 10)
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  num_fargate_nodes = 10) 
 client = Client(local_cluster)
 
 # Compute the SVD of 'Tall-and-Skinny' Matrix 

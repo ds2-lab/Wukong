@@ -365,8 +365,7 @@ def from_frames(frames, deserialize=True, deserializers=None):
             raise
 
    res = _from_frames()
-   #print("\nRes: ", res)
-   raise gen.Return(res)   
+   return res 
 
 @xray_recorder.capture(" dumps_msgpack")   
 def dumps_msgpack(msg):
