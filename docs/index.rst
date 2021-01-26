@@ -15,6 +15,8 @@ Wukong Documentation
    
    design/design
 
+   examples/examples
+
 Introduction
 ==================
 
