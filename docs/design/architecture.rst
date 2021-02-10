@@ -27,10 +27,10 @@ The Serverless Task Executors (often referred to simply as “Executors”) are 
 Dependency Tracking
 -------------------
 Executors communicate with one another through intermediate storage. Each task in the DAG has an associated “dependency counter” maintained within the Metadata Store (MDS), a component of the Storage Manager. Each time an Executor completes a task, the Executor increments the dependency counter of each of the completed task’s dependents. Executors can check whether a task is ready to execute by examining the value of the task’s dependency counter. If the value of the counter is equal to the number of dependencies of the task, then the task is ready to execute. 
-To better illustrate this process, consider the following examples.
+To better illustrate this process, consider the following example.
 
-Example 1
-^^^^^^^^^
+Dependency Tracking Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The diagram below shows a simple DAG containing three tasks: Task A, Task B, and Task C. This DAG will be executed by two Executors: Executor #1 and Executor #2.
 
@@ -67,9 +67,6 @@ At this point, Executor #2 will find that the two values are equal (they are bot
       <script type="text/javascript" src="https://viewer.diagrams.net/js/viewer-static.min.js"></script>
       </body>
    </embed>
-
-Example 2
-^^^^^^^^^
 
 Nam erat dolor, porta sit amet ultricies vel, scelerisque at sapien. Quisque eleifend magna at pharetra suscipit. Proin eu pretium nisi. Praesent ante velit, hendrerit vitae sagittis sit amet, ultricies ac dolor. Vivamus pharetra vitae nisl et ornare. Pellentesque tincidunt eleifend accumsan. Sed augue nisl, sagittis ut scelerisque eu, imperdiet quis nisi. Praesent auctor consectetur risus, in lacinia elit consequat ac.
 
