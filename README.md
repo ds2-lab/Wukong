@@ -7,7 +7,8 @@ A fast and efficient serverless DAG engine.
 First Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
 https://arxiv.org/abs/1910.05896
 
-Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing (Appeared at SoCC '20) https://arxiv.org/abs/2010.07268
+Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing (Appeared at ACM SoCC '20) https://arxiv.org/abs/2010.07268
+If you use our source code for a publication or project, please cite the paper using this [bibtex](#to-cite-wukong).
 
 This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the PDSW paper referenced above.
 
@@ -176,4 +177,25 @@ X, y = dask_ml.datasets.make_classification(n_samples=800000,
 # Start the computation.
 clf.predict(X).compute()
 
+```
+
+## To Cite Wukong
+
+```
+@inproceedings{10.1145/3419111.3421286,
+author = {Carver, Benjamin and Zhang, Jingyuan and Wang, Ao and Anwar, Ali and Wu, Panruo and Cheng, Yue},
+title = {Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing},
+year = {2020},
+isbn = {9781450381376},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3419111.3421286},
+doi = {10.1145/3419111.3421286},
+abstract = {Executing complex, burst-parallel, directed acyclic graph (DAG) jobs poses a major challenge for serverless execution frameworks, which will need to rapidly scale and schedule tasks at high throughput, while minimizing data movement across tasks. We demonstrate that, for serverless parallel computations, decentralized scheduling enables scheduling to be distributed across Lambda executors that can schedule tasks in parallel, and brings multiple benefits, including enhanced data locality, reduced network I/Os, automatic resource elasticity, and improved cost effectiveness. We describe the implementation and deployment of our new serverless parallel framework, called Wukong, on AWS Lambda. We show that Wukong achieves near-ideal scalability, executes parallel computation jobs up to 68.17X faster, reduces network I/O by multiple orders of magnitude, and achieves 92.96% tenant-side cost savings compared to numpywren.},
+booktitle = {Proceedings of the 11th ACM Symposium on Cloud Computing},
+pages = {1–15},
+numpages = {15},
+location = {Virtual Event, USA},
+series = {SoCC '20}
+}
 ```
