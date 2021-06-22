@@ -7,7 +7,7 @@ A fast and efficient serverless DAG engine.
 First Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
 https://arxiv.org/abs/1910.05896
 
-Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing (Appeared at ACM SoCC '20) https://arxiv.org/abs/2010.07268
+Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing (Appeared at ACM SoCC '20) https://arxiv.org/abs/2010.07268 .
 If you use our source code for a publication or project, please cite the paper using this [bibtex](#to-cite-wukong).
 
 This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the PDSW paper referenced above.
