@@ -65,6 +65,7 @@ class TaskExecutionBreakdown(object):
         self.task_execution = task_execution
         self.update_graph_id = update_graph_id 
         self.workload_id = workload_id
+        self.clustering_bytes_saved  = 0
 
         self.redis_read_time = 0
         self.redis_write_time = 0        
@@ -192,6 +193,7 @@ class LambdaExecutionBreakdown(object):
         self.execution_time = 0
         self.total_duration = total_duration
         self.workload_id = workload_id
+        self.clustering_bytes_saved  = 0
 
         self.redis_read_time = 0
         self.redis_write_time = 0
