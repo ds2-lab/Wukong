@@ -18,7 +18,7 @@ Wukong is a serverless DAG scheduler attuned to AWS Lambda. Wukong provides dece
 
 ![Architecture](https://i.imgur.com/QDqMiFs.png "Wukong's Architecture")
 
-## Installing
+## Installation 
 
 Refer to the documentation in the `setup/` directory for information on installing Wukong.
 
