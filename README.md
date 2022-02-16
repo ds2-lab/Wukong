@@ -1,8 +1,16 @@
 # Wukong
 
-A fast and efficient serverless DAG engine.
+A high-performance and highly scalable serverless parallel computing framework. 
+
+## What is Wukong?
+
+Wukong is a serverless parallel computing framework attuned to FaaS platforms such as AWS Lambda. Wukong provides decentralized scheduling using a combination of static and dynamic scheduling. Wukong supports general Python data analytics workloads at any scale. 
+
+![Architecture](https://i.imgur.com/QDqMiFs.png "Wukong's Architecture")
 
 [![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
+
+## Publications
 
 First Paper: In Search of a Fast and Efficient Serverless DAG Engine (Appeared at PDSW '19)
 https://arxiv.org/abs/1910.05896
@@ -11,12 +19,6 @@ Latest Paper: Wukong: A Scalable and Locality-Enhanced Framework for Serverless 
 If you use our source code for a publication or project, please cite the paper using this [bibtex](#to-cite-wukong).
 
 This branch contains the source code of Wukong corresponding to the SoCC 2020 publication, which is a later version than the PDSW paper referenced above.
-
-## What is Wukong?
-
-Wukong is a serverless DAG scheduler attuned to AWS Lambda. Wukong provides decentralized scheduling using a combination of static and dynamic scheduling. Wukong supports general Python data analytics workloads. 
-
-![Architecture](https://i.imgur.com/QDqMiFs.png "Wukong's Architecture")
 
 ## Installation 
 
