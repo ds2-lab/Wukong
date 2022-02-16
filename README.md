@@ -1,5 +1,7 @@
 # Wukong
 
+[![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
+
 A high-performance and highly scalable serverless parallel computing framework. 
 
 ## What is Wukong?
@@ -7,8 +9,6 @@ A high-performance and highly scalable serverless parallel computing framework.
 Wukong is a serverless parallel computing framework attuned to FaaS platforms such as AWS Lambda. Wukong provides decentralized scheduling using a combination of static and dynamic scheduling. Wukong supports general Python data analytics workloads at any scale. 
 
 ![Architecture](https://i.imgur.com/QDqMiFs.png "Wukong's Architecture")
-
-[![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
 
 ## Publications
 
