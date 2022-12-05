@@ -40,15 +40,11 @@ The Scheduler listens for results from Lambda using a "Subscriber Process", whic
 
 ### The KV Store Proxy
 
-This component is used to parallelize Lambda function invocations in the middle of a workload's execution.
-
-...
+This component is used to parallelize Lambda function invocations in the middle of a workload's execution. This is advantageous, as invoking individual AWS Lambda functions has a relatively high overhead (~50ms per invocation). For large fan-outs, this overhead can bottleneck Wukong's performance. Thus, the KV store proxy alleviates that by leveraging a VM with many cores to parallelize such invocations.
 
 ### The AWS Lambda Task Executor
 
-The Task Executors are responsible for executing tasks and performing dynamic scheduling. 
-
-...
+The Task Executors are responsible for executing tasks and performing dynamic scheduling. Executors cooperate with one another to decide who should execute downstream tasks during fan-ins. Executors communicate through intermediate storage (e.g., Redis). 
 
 ### Developer Setup Notes
 
