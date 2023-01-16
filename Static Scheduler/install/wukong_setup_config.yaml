@@ -7,6 +7,9 @@ aws_region: us-east-1
 # For certain settings, it is recommended to leave them with their default value unless you definitely have a reason to change them.
 # This will be indicated in a comment above the corresponding setting/option.
 vpc:
+  # The name of the VPC.
+  Name: WukongVPC
+
   # This controls the range of IPv4 addresses within the VPC specified in CIDR format. 
   # Block sizes must be between a /16 and a /28 netmask. Best to leave this as its default value.
   CidrBlock: 10.0.0.0/16
@@ -15,14 +18,14 @@ vpc:
 
   # These are the CIDR blocks which will be used when creating the private subnets (used by AWS Lambda functions).
   # Important Note: the number of CIDR blocks specified here controls the number of private subnets created.
-  #PrivateSubnetCidrBlocks:
-  #  - 10.0.32.0/19
-  #  - 10.0.0.0/19
+  PrivateSubnetCidrBlocks:
+   - 10.0.32.0/19
+   - 10.0.0.0/19
   
   # Name of security group for AWS Lambda functions.
   #
   # Max length: 64 characters.  
-  #lambda_security_group_name: wukong_lambda_security_group
+  lambda_security_group_name: wukong_lambda_security_group
 
   # Name of security group for AWS EC2 and AWS Fargate.
   #
