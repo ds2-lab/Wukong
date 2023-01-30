@@ -8,4 +8,4 @@ The Static Scheduler and KV Store Proxy can be installed by simply cloning this 
 
 There is a script provided to provision the necessary AWS infrastructure. This script is located at `Wukong/Static Scheduler/install/aws_setup.py`.
 
-Wukong was created from Dask Distributed v1.23.1 and Dask v0.18.0. 
+Wukong was created from Dask Distributed v1.23.1 and Dask v1.2.2. 
