@@ -18,3 +18,4 @@ singledispatch; python_version < '3.4'
 pyyaml
 uhashring
 matplotlib
+ujson
