@@ -7,3 +7,5 @@ To setup the AWS Lambda functions, please refer to the AWS SAM ReadMe file locat
 The Static Scheduler and KV Store Proxy can be installed by simply cloning this GitHub repository. The Static Scheduler is typically executed in an interactive Python session, while the KV Store Proxy is typically executed as its own Python process.
 
 There is a script provided to provision the necessary AWS infrastructure. This script is located at `Wukong/Static Scheduler/install/aws_setup.py`.
+
+Wukong was created from Dask Distributed v1.23.1 and Dask v0.18.0. 
