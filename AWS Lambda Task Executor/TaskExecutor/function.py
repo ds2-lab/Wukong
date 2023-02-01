@@ -1,49 +1,26 @@
 #import json
 import ujson
 import cloudpickle
-from datetime import timedelta
 import datetime
 import base64 
 import redis
 import time
-import dask
 import random
-import dask.array
-import dask.dataframe
-import dask.bag
-import pandas
-#import dask_ml 
-import sklearn 
-import math
-import hashlib
 from dask.core import istask
-import uuid
 import sys
-import socket
 import pickle 
 import queue 
 import logging
 import os
 from zipfile import ZipFile
-import tornado
-from collections import defaultdict
-from tornado import gen, netutil
-from tornado.iostream import StreamClosedError, IOStream
-from tornado.tcpclient import TCPClient
-from tornado.gen import Return
-from tornado.ioloop import IOLoop
 import boto3
-#from multiprocessing import Process, Pipe
-from uhashring import HashRing 
 
 from wukong_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown, WukongEvent
-from utils import funcname, key_split
+from utils import key_split
 from exception import error_message
-from serialization import Serialized, _extract_serialize, extract_serialize, to_frames, dumps, from_frames
-from network import CommClosedError, FatalCommClosedError, parse_address, parse_host_port, connect_to_address, get_stream_address, unparse_host_port, TCP, connect_to_proxy
+from serialization import from_frames
 
 from aws_xray_sdk.core import xray_recorder
-from aws_xray_sdk.core.async_context import AsyncContext
 xray_recorder.configure(service='my_service', sampling=True, context_missing='LOG_ERROR') #context=AsyncContext()
 # This is the code of the AWS Lambda function. 
 # Note that it requires the cloudpickle library.
