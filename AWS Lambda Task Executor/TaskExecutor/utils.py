@@ -1,7 +1,5 @@
 import sys
 import inspect
-import traceback
-import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop
 import os

@@ -1,1 +1,7 @@
 uhashring
+ujson
+cloudpickle
+boto3
+redis-py
+toolz
+msgpack

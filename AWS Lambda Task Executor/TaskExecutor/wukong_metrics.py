@@ -1,5 +1,4 @@
 from collections import defaultdict
-from enum import Enum
 
 # All of the possible event names.
 event_names = ["Store Intermediate Data in Cloud Storage", "Store PathNodes in Cloud Storage", "Get IP from Coordinator", "Invoke Cluster Schedulers", 
