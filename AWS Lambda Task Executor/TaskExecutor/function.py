@@ -187,6 +187,15 @@ def lambda_handler(event, context):
    This is the entry point into the Wukong Task Executor. This function begins by installing additional
    dependencies that are required from S3. These dependencies are used for dask_ml. If you know you
    aren't using going to use dask_ml, then you can comment out the call to install_dependencies().
+   
+    Arguments:
+    ----------
+        event: 
+         JSON-formatted document that contains data for a Lambda function to process. These are essentially input arguments passed to the function during invocation.
+         This will contain input data (or task keys of input data) and other information required by Wukong's executor in order to do its job. 
+        
+        context: 
+         Provides methods and properties that provide information about the invocation, function, and execution environment. Passed by AWS Lambda to the function at runtime. 
    """
    global invoker_function_name
    global executor_function_name
@@ -428,7 +437,7 @@ def lambda_handler(event, context):
 @xray_recorder.capture("task_executor")
 def task_executor(event, context, previous_results = dict(), task_execution_breakdowns = None, lambda_execution_breakdown = None):
    """
-      The main execution loop for AWS Task Executors.
+      The main execution loop for AWS Task Executors. This is ultimately called by the handler (i.e., the `lambda_handler(event, context)` function).
 
       Parameters
       ----------
@@ -688,21 +697,12 @@ def task_executor(event, context, previous_results = dict(), task_execution_brea
       "previous-results": previous_results
    }                         
 
-def scalability_tests():
-
-
-   # Just return a bunch of nothing values.
-   return {
-      "result": None, 
-      "is-leaf": False,
-      "channel": None,
-      "leaf-key": None,
-      "counter-value": None,
-      "previous-results": dict()
-   }
-
 @xray_recorder.capture("publish_dcp_message")
 def publish_dcp_message(channel, payload, serialized = True, max_tries = 8, base_sleep = 0.1, max_sleep = 5):
+   """
+   Used to publish messages via Redis' pub-sub API. The "dcp" refers to "dependency counter process". There is one specific Redis server used by Wukong to track
+   task dependencies (via so-called "dependency counters"). We are using the pub-sub API of that specific Redis server when publishing (or listening for) messages.
+   """
    payload_serialized = payload 
 
    if not serialized:
@@ -732,18 +732,19 @@ def publish_dcp_message(channel, payload, serialized = True, max_tries = 8, base
 
 @xray_recorder.capture("get_path_from_redis")
 def get_path_from_redis(path_key = None, task_execution_breakdown = None, lambda_execution_breakdown = None):
-   """ Retrieve a Path object from Redis. This is a separate method because it does not use a path_node object
-       and it always uses the Redis instance to which dcp_redis is connected.
+   """ 
+   Retrieve a Path object from Redis. This is a separate method because it does not use a path_node object
+   and it always uses the Redis instance to which dcp_redis is connected.
 
-       Args:
-         path_key (String): The Redis key for the desired Path object.
+   Args:
+      path_key (String): The Redis key for the desired Path object.
 
-         task_execution_breakdown (TaskExecutionBreakdown): The WukongMetrics object encapsulating all metrics associated with the currently-processing task.
-         
-         lambda_execution_breakdown (LambdaExecutionBreakdown): The WukongMetrics object encapsulating all metrics associated with this Lambda invocation.         
+      task_execution_breakdown (TaskExecutionBreakdown): The WukongMetrics object encapsulating all metrics associated with the currently-processing task.
+   
+      lambda_execution_breakdown (LambdaExecutionBreakdown): The WukongMetrics object encapsulating all metrics associated with this Lambda invocation.         
 
-       Returns:
-         Path: the Path object stored at the given key in the Redis instance to which dcp_redis is connected.
+   Returns:
+      Path: the Path object stored at the given key in the Redis instance to which dcp_redis is connected.
    """
 
    logger.debug("Obtaining path from Redis for path_key {}".format(path_key))
@@ -3805,6 +3806,9 @@ def process_enqueued_tasks_looped(previous_results,
       }   
 
 def deserialize_payload(payload):
+   """
+   Basically just call the Dask `from_frames` function to deserialize the payload so that the code contained within can be executed.
+   """
    return from_frames(payload)
 
 @xray_recorder.capture("_deserialize")

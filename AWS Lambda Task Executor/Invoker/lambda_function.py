@@ -9,6 +9,16 @@ lc = boto3.client("lambda", region_name = "us-east-1")
 redis_client = None 
 
 def lambda_handler(event, context):
+    """
+    This is the handler for the "Invoker" AWS Lambda function. 
+    The "Invoker" serverless function is used to parallelize large fan-outs in a tree-like structure. 
+    
+    Arguments:
+    ----------
+        event: JSON-formatted document that contains data for a Lambda function to process. These are essentially input arguments passed to the function during invocation.
+        
+        context: Provides methods and properties that provide information about the invocation, function, and execution environment. Passed by AWS Lambda to the function at runtime. 
+    """
     global redis_client
 
     payloads_serialized = None 
