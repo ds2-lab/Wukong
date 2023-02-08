@@ -2,7 +2,7 @@ import boto3
 import json
 import logging 
 import yaml
-import sleep 
+import time 
 
 # Set up logging.
 import logging 
@@ -214,11 +214,11 @@ def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
 
     return {
         "VpcId": vpc.id,
-        #"LambdaSecurityGroupId": lambda_security_group.id,
+        "LambdaSecurityGroupId": serverful_security_group.id,
         "PrivateSubnetIds": [private_subnet.id for private_subnet in private_subnets]
     }
 
-def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, vpc_id : str, private_subnet_ids : list, lambda_security_group_id : str):
+def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subnet_ids : list, lambda_security_group_id : str):
     """
     Create the two AWS Lambda functions required by Wukong.
 
@@ -228,12 +228,12 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, vpc_id : str
 
         wukong_lambda_config (dict)
 
-        vpc_id (str)
-
         private_subnet_ids (list)
 
         lambda_security_group_id (str)
     """
+    logger.info("Next, we must create the AWS Lambda function that acts as the Wukong Executor.")
+    
     executor_function_name = wukong_lambda_config["executor_function_name"]
     invoker_function_name = wukong_lambda_config["invoker_function_name"]
     iam_role_name = wukong_lambda_config["iam_role_name"]
@@ -276,7 +276,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, vpc_id : str
     
     # Now we must attach all of the required policies.
     iam.attach_role_policy(
-        PolicyArn = 'arn:aws:iam::aws:policy/AWSLambdaFullAccess',
+        PolicyArn = 'arn:aws:iam::aws:policy/AWSLambda_FullAccess',
         RoleName = iam_role_name)
     iam.attach_role_policy(
         PolicyArn = 'arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess',
@@ -291,7 +291,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, vpc_id : str
     logger.info("Successfully created and configured IAM role for AWS Lambda functions.")
     logger.info("Next, creating AWS Lambda function for Wukong Executor...")
     lambda_client.create_function(
-        Code = "", # TODO: Fill in code somehow... 
+        Code = {"ZipFile": open("./wukong_aws_lambda_code.zip", "rb").read()},
         FunctionName = executor_function_name,
         Runtime = 'python3.7',
         Role = role_arn,
@@ -300,7 +300,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, vpc_id : str
         Timeout = function_timeout_seconds,
         VpcConfig = {
             'SubnetIds': private_subnet_ids,
-            'SecurityGroupIds': lambda_security_group_id
+            'SecurityGroupIds': [lambda_security_group_id]
         },
         Layers = [
             # This is an Amazon-created layer containing NumPy and SciPy.
@@ -313,6 +313,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, vpc_id : str
             "arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9"
         ]
     )
+
 
 def setup_aws_fargate(aws_region : str, wukong_ecs_config : dict):
     cluster_name = wukong_ecs_config["cluster_name"]
@@ -363,7 +364,6 @@ def setup_aws_fargate(aws_region : str, wukong_ecs_config : dict):
 
     logger.info("Successfully registered the task definition!")
 
-
 if __name__ == "__main__":
     print("Welcome to the Wukong Interactive Setup. Please note that many of the components created for running Wukong")
     print("cost money (e.g., NAT gateways, elastic IP addresses, etc.). Be aware that your account will begin incurring")
@@ -380,7 +380,6 @@ if __name__ == "__main__":
         wukong_setup_config = yaml.load(f, Loader = yaml.FullLoader)
     
     aws_region = wukong_setup_config["aws_region"]
-
     
     wukong_vpc_config = wukong_setup_config["vpc"]              # VPC configuration.
     wukong_lambda_config = wukong_setup_config["aws_lambda"]    # AWS Lambda configuration.
@@ -388,12 +387,11 @@ if __name__ == "__main__":
 
     # Step 1: Create the VPC
     results = create_wukong_vpc(aws_region, wukong_vpc_config)
-    vpc_id = results['VpcId']
-    #private_subnet_ids = results['PrivateSubnetIds']
-    #lambda_security_group_id = results['LambdaSecurityGroupId']
+    private_subnet_ids = results['PrivateSubnetIds']
+    lambda_security_group_id = results['LambdaSecurityGroupId']
 
     # Step 2: Create AWS Lambda functions.
-    #setup_aws_lambda(aws_region, wukong_lambda_config, vpc_id, private_subnet_ids, lambda_security_group_id)
+    setup_aws_lambda(aws_region, wukong_lambda_config, private_subnet_ids, lambda_security_group_id)
 
     # Step 3: Create AWS ECS Cluster.
-    setup_aws_fargate(aws_region, wukong_ecs_config)
+    # setup_aws_fargate(aws_region, wukong_ecs_config)
