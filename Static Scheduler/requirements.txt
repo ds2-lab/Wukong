@@ -19,3 +19,4 @@ ujson
 futures; python_version < '3.0'
 singledispatch; python_version < '3.4'
 pyyaml
+boto3 
