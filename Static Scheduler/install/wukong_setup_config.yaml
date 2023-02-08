@@ -3,6 +3,11 @@
 # This is the region in which we'll be creating the AWS infrastructure. 
 aws_region: us-east-1
 
+# Replace this with your PUBLIC IP. We use this to create a security group rule to enable SSH from your IP address.
+# You can google "what is my IP" or go to https://www.whatsmyip.org/ to get this value. Alternatively, the
+# script will attempt to automatically resolve it for you if you do not change this default value.
+user_public_ip: DEFAULT_VALUE
+
 # These settings are used when setting up the Virtual Private Cloud (VPC) used by Wukong.
 # For certain settings, it is recommended to leave them with their default value unless you definitely have a reason to change them.
 # This will be indicated in a comment above the corresponding setting/option.

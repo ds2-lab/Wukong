@@ -3,6 +3,7 @@ import json
 import logging 
 import yaml
 import time 
+from requests import get
 
 # Set up logging.
 import logging 
@@ -18,7 +19,7 @@ logger.addHandler(ch)
 
 PATH_PROMPT = "Please enter the path to the Wukong Setup Configuration File. Enter nothing for default (same directory as this script).\n> "
 
-def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
+def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
     """
     This function first creates a Virtual Private Cloud (VPC). 
     Next, it creates an Internet Gateway, allocates an Elastic IP Address, and creates a NAT Gateway.
@@ -202,10 +203,36 @@ def create_wukong_vpc(aws_region : str, wukong_vpc_config : dict):
 
     # The security group used by AWS EC2 and AWS Fargate instances/nodes.
     serverful_security_group = ec2_resource.create_security_group(
-        Description='Wukong Security Group', GroupName = serverful_security_group_name, VpcId = vpc.id)
+        Description='Wukong Security Group', GroupName = serverful_security_group_name, VpcId = vpc.id,
+        TagSpecifications = [{
+            "ResourceType": "security-group",
+            "Tags": [
+                {"Key": "Name", "Value": serverful_security_group_name}
+            ]
+        }])
     
     #lambda_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
-    serverful_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
+    #serverful_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
+    serverful_security_group.authorize_ingress(IpPermissions = [
+        {
+        # All traffic that originates from within the security group itself.
+        "FromPort": 0,
+        "ToPort": 65535,
+        "IpProtocol": "-1",
+        "UserIdGroupPairs": [{
+            "GroupId": serverful_security_group.id,
+            "VpcId": vpc.id}]
+        },
+        {
+        # SSH traffic from your machine's IP address. 
+        "FromPort": 22,
+        "ToPort": 22,
+        "IpProtocol": "tcp",
+        "IpRanges": [
+            {"CidrIp": user_ip + "/32", "Description": "SSH from my PC"}]
+        }
+    ])
+    #serverful_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
 
     logger.info("Successfully created and configured the security group.\n\n")
     logger.info("==========================")
@@ -380,13 +407,17 @@ if __name__ == "__main__":
         wukong_setup_config = yaml.load(f, Loader = yaml.FullLoader)
     
     aws_region = wukong_setup_config["aws_region"]
+    user_public_ip = wukong_setup_config["user_public_ip"]
+    
+    if user_public_ip == "DEFAULT_VALUE":
+        user_public_ip = get('https://api.ipify.org').content.decode('utf8')
     
     wukong_vpc_config = wukong_setup_config["vpc"]              # VPC configuration.
     wukong_lambda_config = wukong_setup_config["aws_lambda"]    # AWS Lambda configuration.
     wukong_ecs_config = wukong_setup_config["ecs"]                  # AWS Fargate/AWS ECS configuration.
 
     # Step 1: Create the VPC
-    results = create_wukong_vpc(aws_region, wukong_vpc_config)
+    results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config)
     private_subnet_ids = results['PrivateSubnetIds']
     lambda_security_group_id = results['LambdaSecurityGroupId']
 
