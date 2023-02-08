@@ -24,7 +24,7 @@ This branch contains the source code of Wukong corresponding to the SoCC 2020 pu
 
 A majority of the required AWS infrastructure can be created using the provided `aws_setup.py` script in `Wukong/Static Scheduler/install/` directory. Please be sure to read through the `wukong_setup_config.yaml` configuration file located in the same directory prior to running the script. In particular, your public IP address should be added to the configuration file if you'd like SSH to be enabled from your machine to VMs created in the Wukong VPC. 
 
-Refer to the documentation in the `setup/` directory for information on installing Wukong.
+In addition, there is documentation in the `setup/` directory for additional/supplementary instructions concerning the creation of the AWS infrastructure for Wukong.
 
 ## Code Overview/Explanation 
 
