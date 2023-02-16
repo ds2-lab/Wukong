@@ -188,24 +188,24 @@ clf.predict(X).compute()
 ```
 @inproceedings{10.1145/3419111.3421286,
 author = {Carver, Benjamin and Zhang, Jingyuan and Wang, Ao and Anwar, Ali and Wu, Panruo and Cheng, Yue},
-title = {Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing},
-year = {2020},
-isbn = {9781450381376},
-publisher = {Association for Computing Machinery},
-url = {https://doi.org/10.1145/3419111.3421286},
-doi = {10.1145/3419111.3421286},
-series = {SoCC '20}
+  title = {Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing},
+  year = {2020},
+  isbn = {9781450381376},
+  publisher = {Association for Computing Machinery},
+  url = {https://doi.org/10.1145/3419111.3421286},
+  doi = {10.1145/3419111.3421286},
+  series = {SoCC '20}
 }
 ```
 
 ```
 @INPROCEEDINGS {8955207,
 author = {B. Carver and J. Zhang and A. Wang and Y. Cheng},
-booktitle = {2019 IEEE/ACM Fourth International Parallel Data Systems Workshop (PDSW)},
-title = {In Search of a Fast and Efficient Serverless DAG Engine},
-year = {2019},
-doi = {10.1109/PDSW49588.2019.00005},
-url = {https://doi.ieeecomputersociety.org/10.1109/PDSW49588.2019.00005},
-publisher = {IEEE Computer Society}
+  booktitle = {2019 IEEE/ACM Fourth International Parallel Data Systems Workshop (PDSW)},
+  title = {In Search of a Fast and Efficient Serverless DAG Engine},
+  year = {2019},
+  doi = {10.1109/PDSW49588.2019.00005},
+  url = {https://doi.ieeecomputersociety.org/10.1109/PDSW49588.2019.00005},
+  publisher = {IEEE Computer Society}
 }
 ```
