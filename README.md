@@ -192,14 +192,20 @@ title = {Wukong: A Scalable and Locality-Enhanced Framework for Serverless Paral
 year = {2020},
 isbn = {9781450381376},
 publisher = {Association for Computing Machinery},
-address = {New York, NY, USA},
 url = {https://doi.org/10.1145/3419111.3421286},
 doi = {10.1145/3419111.3421286},
-abstract = {Executing complex, burst-parallel, directed acyclic graph (DAG) jobs poses a major challenge for serverless execution frameworks, which will need to rapidly scale and schedule tasks at high throughput, while minimizing data movement across tasks. We demonstrate that, for serverless parallel computations, decentralized scheduling enables scheduling to be distributed across Lambda executors that can schedule tasks in parallel, and brings multiple benefits, including enhanced data locality, reduced network I/Os, automatic resource elasticity, and improved cost effectiveness. We describe the implementation and deployment of our new serverless parallel framework, called Wukong, on AWS Lambda. We show that Wukong achieves near-ideal scalability, executes parallel computation jobs up to 68.17X faster, reduces network I/O by multiple orders of magnitude, and achieves 92.96% tenant-side cost savings compared to numpywren.},
-booktitle = {Proceedings of the 11th ACM Symposium on Cloud Computing},
-pages = {1–15},
-numpages = {15},
-location = {Virtual Event, USA},
 series = {SoCC '20}
+}
+```
+
+```
+@INPROCEEDINGS {8955207,
+author = {B. Carver and J. Zhang and A. Wang and Y. Cheng},
+booktitle = {2019 IEEE/ACM Fourth International Parallel Data Systems Workshop (PDSW)},
+title = {In Search of a Fast and Efficient Serverless DAG Engine},
+year = {2019},
+doi = {10.1109/PDSW49588.2019.00005},
+url = {https://doi.ieeecomputersociety.org/10.1109/PDSW49588.2019.00005},
+publisher = {IEEE Computer Society}
 }
 ```
