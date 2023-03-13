@@ -84,6 +84,10 @@ LocalCluster(object):
     task invocation. The principle here is the same as with the initial task invokers. Our tests found that invoking Lambda functions
     takes about 50ms on average. As a result, if a given Task T has a large fanout (i.e., there are a large number of downstream tasks 
     directly dependent on T), then it may be advantageous to parallelize the invocation of these downstream tasks.
+  use_fargate : bool
+    If True, then Wukong will attempt to use AWS Fargate for its intermediate storage. This requires that the AWS Fargate infrastructure
+    already exists and that Wukong has been correctly configured to use it (i.e., passing the required information to the 'LocalCluster'
+    instance. This defaults to False, in which case Wukong simply uses a single Redis instance for all intermediate storage.
 ```
 
 ### SVD of 'Tall-and-Skinny' Matrix 
