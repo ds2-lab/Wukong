@@ -161,7 +161,7 @@ class LocalCluster(SpecCluster):
         use_bit_dep_checking = True,
         debug_mode = False,
         lambda_debug = False,
-        use_fargate = True,
+        use_fargate = False, # By default, do not use AWS Fargate. 
         ecs_task_definition = 'WukongRedisNode:1',
                 ecs_network_configuration = {
                             'awsvpcConfiguration': {
