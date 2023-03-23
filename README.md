@@ -90,13 +90,93 @@ LocalCluster(object):
     instance. This defaults to False, in which case Wukong simply uses a single Redis instance for all intermediate storage.
 ```
 
+### Single-Node DAG Example
+```python
+import dask.array as da
+from distributed import LocalCluster, Client
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  use_fargate = False) 
+client = Client(local_cluster)
+
+# Define a function.
+
+def incr(x):
+  return x + 1
+  
+example_computation = dask.delayed(incr)(5)
+
+# Start the workload. 
+result = example_computation.compute()
+print("Result: %d" % result)  
+```
+
+### Three-Node DAG Examples
+```python
+import dask.array as da
+from distributed import LocalCluster, Client
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  use_fargate = False) 
+client = Client(local_cluster)
+
+# Define some functions.
+
+def incr(x):
+  return x + 1
+
+def decr(x):
+  return x - 1
+
+def double(x):
+  return x * 2
+
+def add_values(x, y):
+  return x + y 
+  
+# Linear 3-Node DAG
+a = dask.delayed(incr)(5)
+b = dask.delayed(decr)(a)
+c = dask.delayed(double)(b)
+
+result1 = c.compute()
+print("Result: %d" % result1)  
+
+# 3-Node DAG with a Fan-In
+x = dask.delayed(incr)(3)
+y = dask.delayed(decr)(7)
+z = dask.delayed(add_values)(x,y)
+
+result2 = z.compute()
+print("Result: %d" % result2)  
+
+```
+
+### Tree Reduction
+``` python
+from dask import delayed 
+import operator 
+from distributed import LocalCluster, Client
+local_cluster = LocalCluster(host='0.0.0.0:8786',
+                  proxy_address = '3.83.198.204', 
+                  use_fargate = False) 
+client = Client(local_cluster)
+
+L = range(1024)
+while len(L) > 1:
+  L = list(map(delayed(operator.add), L[0::2], L[1::2]))
+
+# Start the computation.
+L[0].compute()
+```
+
 ### SVD of 'Tall-and-Skinny' Matrix 
 ```python
 import dask.array as da
 from distributed import LocalCluster, Client
 local_cluster = LocalCluster(host='0.0.0.0:8786',
                   proxy_address = '3.83.198.204', 
-                  num_fargate_nodes = 10) 
+                  use_fargate = False) 
 client = Client(local_cluster)
 
 # Compute the SVD of 'Tall-and-Skinny' Matrix 
@@ -113,7 +193,7 @@ import dask.array as da
 from distributed import LocalCluster, Client
 local_cluster = LocalCluster(host='0.0.0.0:8786',
                   proxy_address = '3.83.198.204', 
-                  num_fargate_nodes = 10) 
+                  use_fargate = False) 
 client = Client(local_cluster)
 
 # Compute the SVD of 'Tall-and-Skinny' Matrix 
@@ -124,31 +204,13 @@ u, s, v = da.linalg.svd_compressed(X, k=5)
 v.compute()
 ```
 
-### Tree Reduction
-``` python
-from dask import delayed 
-import operator 
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
-                  num_fargate_nodes = 10) 
-client = Client(local_cluster)
-
-L = range(1024)
-while len(L) > 1:
-  L = list(map(delayed(operator.add), L[0::2], L[1::2]))
-
-# Start the computation.
-L[0].compute()
-```
-
 ### GEMM (Matrix Multiplication) 
 ``` python
 import dask.array as da
 from distributed import LocalCluster, Client
 local_cluster = LocalCluster(host='0.0.0.0:8786',
                   proxy_address = '3.83.198.204', 
-                  num_fargate_nodes = 10) 
+                  use_fargate = False) 
 client = Client(local_cluster)
 
 x = da.random.random((10000, 10000), chunks = (1000, 1000))
@@ -171,7 +233,7 @@ from dask_ml.wrappers import ParallelPostFit
 from distributed import LocalCluster, Client
 local_cluster = LocalCluster(host='0.0.0.0:8786',
                   proxy_address = '3.83.198.204', 
-                  num_fargate_nodes = 10) 
+                  use_fargate = False) 
 client = Client(local_cluster)
 
 X, y = sklearn.datasets.make_classification(n_samples=1000)
