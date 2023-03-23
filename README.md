@@ -93,6 +93,7 @@ LocalCluster(object):
 ### Single-Node DAG Example
 ```python
 import dask.array as da
+from dask import delayed
 from distributed import LocalCluster, Client
 local_cluster = LocalCluster(host='0.0.0.0:8786',
                   proxy_address = '3.83.198.204', 
@@ -104,7 +105,7 @@ client = Client(local_cluster)
 def incr(x):
   return x + 1
   
-example_computation = dask.delayed(incr)(5)
+example_computation = delayed(incr)(5)
 
 # Start the workload. 
 result = example_computation.compute()
@@ -114,6 +115,7 @@ print("Result: %d" % result)
 ### Three-Node DAG Examples
 ```python
 import dask.array as da
+from dask import delayed
 from distributed import LocalCluster, Client
 local_cluster = LocalCluster(host='0.0.0.0:8786',
                   proxy_address = '3.83.198.204', 
@@ -135,17 +137,17 @@ def add_values(x, y):
   return x + y 
   
 # Linear 3-Node DAG
-a = dask.delayed(incr)(5)
-b = dask.delayed(decr)(a)
-c = dask.delayed(double)(b)
+a = delayed(incr)(5)
+b = delayed(decr)(a)
+c = delayed(double)(b)
 
 result1 = c.compute()
 print("Result: %d" % result1)  
 
 # 3-Node DAG with a Fan-In
-x = dask.delayed(incr)(3)
-y = dask.delayed(decr)(7)
-z = dask.delayed(add_values)(x,y)
+x = delayed(incr)(3)
+y = delayed(decr)(7)
+z = delayed(add_values)(x,y)
 
 result2 = z.compute()
 print("Result: %d" % result2)  
