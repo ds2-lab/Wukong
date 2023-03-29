@@ -37,6 +37,9 @@ vpc:
   # Max length: 64 characters.  
   serverful_security_group_name: wukong_serverful_security_group
 
+  # If skipping the VPC-creation step, then this property must be specified.
+  private_subnet_ids: []
+
 # The following configuration is used when setting up the AWS Lambda functions.
 aws_lambda:
   # This will be the name of the AWS Lambda function used as Wukong's serverless Executor.

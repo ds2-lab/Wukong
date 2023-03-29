@@ -1,3 +1,4 @@
+import argparse 
 import boto3
 import json
 import logging 
@@ -19,7 +20,18 @@ logger.addHandler(ch)
 
 PATH_PROMPT = "Please enter the path to the Wukong Setup Configuration File. Enter nothing for default (same directory as this script).\n> "
 
-def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
+def get_arguments():
+    parser = argparse.ArgumentParser()
+    
+    parser.add_argument("-c", "--config", dest = 'config_file_path', type = str, default = None, help = "The path to the configuration file. If nothing is passed, then the user will be explicitly prompted for the configuration path once this script begins executing.")
+    parser.add_argument("-p", "--aws-profile", dest = 'aws_profile', default = None, type = str, help = "The AWS credentials profile to use when creating the resources. If nothing is specified, then this script will ultimately use the default AWS credentials profile.")
+    
+    parser.add_argument("--skip-vpc", dest = "skip_vpc_creation", action = 'store_true', help = "If passed, then skip the VPC creation step. Note that if this step is skipped, then the subnet IDs of the target VPC's private subnets as well as the security group ID to be used for AWS Lambda must be provided explicitly in the configuration file.")
+    parser.add_argument("--skip-lambda", dest = "skip_aws_lambda_creation", action = 'store_true', help = "If passed, then skip the creation of the AWS Lambda function(s).")
+    
+    return parser.parse_args()
+
+def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, aws_profile = None):
     """
     This function first creates a Virtual Private Cloud (VPC). 
     Next, it creates an Internet Gateway, allocates an Elastic IP Address, and creates a NAT Gateway.
@@ -29,6 +41,12 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
         aws_region (string)
 
         wukong_vpc_config (dict)
+        
+    Keyword Arguments:
+    ------------------
+        aws_profile (str):
+            The AWS credentials profile to use when creating the resources. 
+            If None, then this script will ultimately use the default AWS credentials profile.
     
     Returns:
     --------
@@ -38,8 +56,18 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
             "PrivateSubnetIds": The ID's of the newly-created private subnets (used for AWS Lambda functions).
         }
     """
-    ec2_resource = boto3.resource('ec2', region_name = aws_region)
-    ec2_client = boto3.client('ec2', region_name = aws_region)
+    if aws_profile is not None:
+        try:
+            session = boto3.Session(profile_name = aws_profile)
+        except Exception as ex: 
+            print("Error encountered while trying to use AWS credentials profile \"%s\"." % aws_profile)
+            raise ex 
+        
+        ec2_resource = session.resource('ec2', region_name = aws_region)
+        ec2_client = session.client('ec2', region_name = aws_region)
+    else:
+        ec2_resource = boto3.resource('ec2', region_name = aws_region)
+        ec2_client = boto3.client('ec2', region_name = aws_region)
 
     CidrBlock = wukong_vpc_config["CidrBlock"]
     PublicSubnetCidrBlock = wukong_vpc_config["PublicSubnetCidrBlock"]
@@ -245,7 +273,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
         "PrivateSubnetIds": [private_subnet.id for private_subnet in private_subnets]
     }
 
-def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subnet_ids : list, lambda_security_group_id : str):
+def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subnet_ids : list, lambda_security_group_id : str, aws_profile = None):
     """
     Create the two AWS Lambda functions required by Wukong.
 
@@ -258,6 +286,13 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
         private_subnet_ids (list)
 
         lambda_security_group_id (str)
+    
+    Keyword Arguments:
+    ------------------
+        aws_profile (str):
+            The AWS credentials profile to use when creating the resources. 
+            If None, then this script will ultimately use the default AWS credentials profile.
+    
     """
     logger.info("Next, we must create the AWS Lambda function that acts as the Wukong Executor.")
     
@@ -272,9 +307,19 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
     assert(len(invoker_function_name) >= 1 and len(invoker_function_name) <= 64)
     assert(function_memory_mb >= 128 and function_memory_mb <= 3008)
     assert(function_timeout_seconds >= 1 and function_timeout_seconds <= 900)
-
-    lambda_client = boto3.client("lambda", region_name = aws_region)
-    iam = boto3.client('iam')
+    
+    if aws_profile is not None:
+        try:
+            session = boto3.Session(profile_name = aws_profile)
+        except Exception as ex: 
+            print("Error encountered while trying to use AWS credentials profile \"%s\"." % aws_profile)
+            raise ex 
+        
+        lambda_client = session.client("lambda", region_name = aws_region)
+        iam = session.client('iam')
+    else:
+        lambda_client = boto3.client("lambda", region_name = aws_region)
+        iam = boto3.client('iam')
 
     logger.info("First, we need to create an IAM role for the AWS Lambda functions. Creating role now...")
     description = "Role used for AWS Lambda functions within the Wukong serverless DAG execution framework."
@@ -342,64 +387,69 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
     )
 
 
-def setup_aws_fargate(aws_region : str, wukong_ecs_config : dict):
-    cluster_name = wukong_ecs_config["cluster_name"]
+# def setup_aws_fargate(aws_region : str, wukong_ecs_config : dict):
+#     cluster_name = wukong_ecs_config["cluster_name"]
 
-    assert(len(cluster_name) >= 1 and len(cluster_name) <= 255)
+#     assert(len(cluster_name) >= 1 and len(cluster_name) <= 255)
 
-    ecs_client = boto3.client('ecs', region_name = aws_region)
+#     ecs_client = boto3.client('ecs', region_name = aws_region)
 
-    logger.info("First, creating the ECS Fargate cluster...")
+#     logger.info("First, creating the ECS Fargate cluster...")
 
-    ecs_client.create_cluster(clusterName = cluster_name, capacityProviders = ["FARGATE", "FARGATE_SPOT"])
+#     ecs_client.create_cluster(clusterName = cluster_name, capacityProviders = ["FARGATE", "FARGATE_SPOT"])
 
-    logger.info("Successfully created the ECS Fargate cluster.")
-    logger.info("Next, registering a task definition to use as the Fargate Redis nodes...")
+#     logger.info("Successfully created the ECS Fargate cluster.")
+#     logger.info("Next, registering a task definition to use as the Fargate Redis nodes...")
 
-    ecs_client.register_task_definition(
-        family = 'Wukong',
-        executionRoleArn = 'arn:aws:iam::833201972695:role/ecsTaskExecutionRole',
-        networkMode = 'awsvpc',
-        containerDefinitions = [
-            {
-                "logConfiguration": {
-                    "logDriver": "awslogs",
-                    "options": {
-                    "awslogs-group": "/ecs/WukongRedisNode",
-                    "awslogs-region": "us-east-1",
-                    "awslogs-stream-prefix": "ecs"
-                    }
-                },
-                "portMappings": [
-                    {
-                    "hostPort": 6379,
-                    "protocol": "tcp",
-                    "containerPort": 6379
-                    }
-                ],
-                "cpu": 0,
-                "environment": [],
-                "mountPoints": [],
-                "memoryReservation": 30000,
-                "volumesFrom": [],
-                "image": "redis",
-                "essential": True,
-                "name": "Redis"
-            }
-        ]
-    )
+#     ecs_client.register_task_definition(
+#         family = 'Wukong',
+#         executionRoleArn = 'arn:aws:iam::833201972695:role/ecsTaskExecutionRole',
+#         networkMode = 'awsvpc',
+#         containerDefinitions = [
+#             {
+#                 "logConfiguration": {
+#                     "logDriver": "awslogs",
+#                     "options": {
+#                     "awslogs-group": "/ecs/WukongRedisNode",
+#                     "awslogs-region": "us-east-1",
+#                     "awslogs-stream-prefix": "ecs"
+#                     }
+#                 },
+#                 "portMappings": [
+#                     {
+#                     "hostPort": 6379,
+#                     "protocol": "tcp",
+#                     "containerPort": 6379
+#                     }
+#                 ],
+#                 "cpu": 0,
+#                 "environment": [],
+#                 "mountPoints": [],
+#                 "memoryReservation": 30000,
+#                 "volumesFrom": [],
+#                 "image": "redis",
+#                 "essential": True,
+#                 "name": "Redis"
+#             }
+#         ]
+#     )
 
-    logger.info("Successfully registered the task definition!")
+#     logger.info("Successfully registered the task definition!")
 
 if __name__ == "__main__":
     print("Welcome to the Wukong Interactive Setup. Please note that many of the components created for running Wukong")
     print("cost money (e.g., NAT gateways, elastic IP addresses, etc.). Be aware that your account will begin incurring")
     print("cost once these components are setup.")
-
-    config_file_path = input(PATH_PROMPT)
     
-    # If the user entered nothing (i.e., the empty string), then we assume the configuration file is in the same directory as the script.
-    if config_file_path == "":
+    command_line_args = get_arguments()
+
+    config_file_path = command_line_args.config_file_path
+    if not config_file_path:
+        config_file_path = input(PATH_PROMPT)
+    
+    # If the user entered nothing (i.e., the empty string), then we assume
+    # the configuration file is in the same directory as the script.
+    if config_file_path == "" or config_file_path is None:
         config_file_path = "./wukong_setup_config.yaml"
 
     # Open the Wukong Setup Configuration file. 
@@ -423,14 +473,28 @@ if __name__ == "__main__":
     wukong_vpc_config = wukong_setup_config["vpc"]              # VPC configuration.
     wukong_lambda_config = wukong_setup_config["aws_lambda"]    # AWS Lambda configuration.
     wukong_ecs_config = wukong_setup_config["ecs"]                  # AWS Fargate/AWS ECS configuration.
-
+    
     # Step 1: Create the VPC
-    results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config)
-    private_subnet_ids = results['PrivateSubnetIds']
-    lambda_security_group_id = results['LambdaSecurityGroupId']
+    if not command_line_args.skip_vpc_creation:
+        results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config, aws_profile = command_line_args.aws_profile)
+        private_subnet_ids = results['PrivateSubnetIds']
+        lambda_security_group_id = results['LambdaSecurityGroupId']
+    else:
+        print("Skipping the VPC-creation step.")
+        # If we skip the creation of the VPC, then we need to obtain the private_subnet_ids
+        # and lambda_security_group_id from the configuration file.
+        lambda_security_group_id = wukong_vpc_config["lambda_security_group_name"] 
+        
+        if "private_subnet_ids" not in wukong_vpc_config or len(wukong_vpc_config["vpc_private_subnet_ids"]) == 0:
+            raise ValueError("Since you're skipping the VPC-creation step, you must provide the IDs of the private subnets in the configuration file under the \"vpc.private_subnet_ids\" property.")
+        
+        private_subnet_ids = wukong_vpc_config["vpc_private_subnet_ids"] 
 
     # Step 2: Create AWS Lambda functions.
-    setup_aws_lambda(aws_region, wukong_lambda_config, private_subnet_ids, lambda_security_group_id)
+    if not command_line_args.skip_aws_lambda_creation:
+        setup_aws_lambda(aws_region, wukong_lambda_config, private_subnet_ids, lambda_security_group_id, aws_profile = command_line_args.aws_profile)
+    else:
+        print("Skipping the creation of the AWS Lambda function(s).")
 
     # Step 3: Create AWS ECS Cluster.
     # setup_aws_fargate(aws_region, wukong_ecs_config)
