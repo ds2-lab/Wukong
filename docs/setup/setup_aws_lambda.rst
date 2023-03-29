@@ -13,6 +13,8 @@ Automatic AWS Lambda Deployment
 
 The files required to deploy the AWS Lambda functions via AWS SAM template can be found in the ``/Wukong/AWS Lambda Task Executor/`` directory. Much of the following information can be found in the ``SAMREADME.md`` file.
 
+NOTE: Ensure you have installed the ``boto3`` Python module and the AWS CLI on your computer. Likewise, ensure the AWS CLI has been configured so that ``boto3`` can find and use your AWS credentials.
+
 ****************************
 Manual AWS Lambda Deployment 
 ****************************

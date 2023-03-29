@@ -1,4 +1,6 @@
 # This file is used by the aws_setup.py script when setting up the AWS infrastructure to run Wukong.
+# NOTE: Ensure you have installed the ``boto3`` Python module and the AWS CLI on your computer. 
+# Likewise, ensure the AWS CLI has been configured so that ``boto3`` can find and use your AWS credentials.
 
 # This is the region in which we'll be creating the AWS infrastructure. 
 aws_region: us-east-1
