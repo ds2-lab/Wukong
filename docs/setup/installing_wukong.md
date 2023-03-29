@@ -11,3 +11,5 @@ A majority of the required AWS infrastructure can be created using the provided 
 There is a public AWS EC2 AMI available in the `us-east-1` (Northern Virginia) region with ID `TBD`. This AMI can be used to quickly create the Wukong Static Scheduler and Key-Value Store Proxy (two separate VMs). 
 
 Wukong was created from Dask Distributed v1.23.1 and Dask v1.2.2. 
+
+**NOTE**: Ensure you have installed the ``boto3`` Python module and the AWS CLI on your computer. Likewise, ensure the AWS CLI has been configured so that ``boto3`` can find and use your AWS credentials.
