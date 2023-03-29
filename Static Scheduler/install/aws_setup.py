@@ -403,8 +403,16 @@ if __name__ == "__main__":
         config_file_path = "./wukong_setup_config.yaml"
 
     # Open the Wukong Setup Configuration file. 
-    with open(config_file_path) as f:
-        wukong_setup_config = yaml.load(f, Loader = yaml.FullLoader)
+    try:
+        with open(config_file_path) as f:
+            wukong_setup_config = yaml.load(f, Loader = yaml.FullLoader)
+            print("Successfully loaded configuration file at \"%s\"" % config_file_path)
+    except FileNotFoundError as ex:
+        print("Failed to load configuration file \"%s\". Please verify that the file exists." % config_file_path)
+        print("The actual exception that was encountered:\n", ex)
+    except yaml.YAMLError as ex:
+        print("Error parsing configuration file \"%s\". Please verify that the file does not contain any YAML errors." % config_file_path)
+        print("The actual exception that was encountered:\n", ex)
     
     aws_region = wukong_setup_config["aws_region"]
     user_public_ip = wukong_setup_config["user_public_ip"]
