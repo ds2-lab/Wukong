@@ -112,7 +112,7 @@ result = example_computation.compute()
 print("Result: %d" % result)  
 ```
 
-### Three-Node DAG Examples
+### 3-Node DAG Examples
 ```python
 import dask.array as da
 from dask import delayed
