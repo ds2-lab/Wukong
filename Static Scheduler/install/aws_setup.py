@@ -57,8 +57,10 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
         }
     """
     if aws_profile is not None:
+        print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % aws_profile)
         try:
             session = boto3.Session(profile_name = aws_profile)
+            print("Success!")
         except Exception as ex: 
             print("Error encountered while trying to use AWS credentials profile \"%s\"." % aws_profile)
             raise ex 
@@ -309,8 +311,10 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
     assert(function_timeout_seconds >= 1 and function_timeout_seconds <= 900)
     
     if aws_profile is not None:
+        print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % aws_profile)
         try:
             session = boto3.Session(profile_name = aws_profile)
+            print("Success!")
         except Exception as ex: 
             print("Error encountered while trying to use AWS credentials profile \"%s\"." % aws_profile)
             raise ex 
