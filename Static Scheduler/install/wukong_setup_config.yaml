@@ -39,7 +39,10 @@ vpc:
   # Max length: 64 characters.  
   serverful_security_group_name: wukong_serverful_security_group
 
-  # If skipping the VPC-creation step, then this property must be specified.
+  # If skipping the VPC-creation step, then this property can be specified directly here.
+  # Alternatively, the script will attempt to resolve the private subnet IDs by inspecting
+  # the route tables to determine which subnets are routed to a NAT Gateway (rather than
+  # an Internet Gateway, as only the public subnets will be routed to an Internet Gateway).
   private_subnet_ids: []
 
 # The following configuration is used when setting up the AWS Lambda functions.
