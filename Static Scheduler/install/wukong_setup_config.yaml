@@ -29,15 +29,16 @@ vpc:
    - 10.0.32.0/19
    - 10.0.0.0/19
   
-  # Name of security group for AWS Lambda functions.
+  # Name of security group used by Wukong AWS resources.
   #
   # Max length: 64 characters.  
-  lambda_security_group_name: wukong_lambda_security_group
+  security_group_name: wukong_serverful_security_group
 
-  # Name of security group for AWS EC2 and AWS Fargate.
-  #
-  # Max length: 64 characters.  
-  serverful_security_group_name: wukong_serverful_security_group
+  # This value will be generated automatically if creating the VPC using this script.
+  # If skipping the VPC-creation step, then you may optionally provide this value explicitly here.
+  # If this value is not provided explicitly, then the script will attempt to retrieve the 
+  # security group ID from AWS automatically using the `security_group_name` property.
+  security_group_id: 
 
   # If skipping the VPC-creation step, then this property can be specified directly here.
   # Alternatively, the script will attempt to resolve the private subnet IDs by inspecting
