@@ -579,7 +579,7 @@ if __name__ == "__main__":
                 
                 ec2 = session.resource('ec2')
             else:
-                print("Creating EC2 clientn now...")
+                print("Creating AWS EC2 client now...")
                 ec2 = boto3.resource('ec2')
                 print_success("Success!", no_color=no_color)
             
@@ -611,6 +611,7 @@ if __name__ == "__main__":
                 }
             ])
             
+            print("Attempting to automatically retrieve private subnet IDs now...")
             # Attempt to automatically retrieve the private subnet IDs by examining the routes.
             # The 'GatewayID' attribute is: "The ID of an internet gateway or virtual private gateway attached to your VPC."
             private_subnet_ids = []
