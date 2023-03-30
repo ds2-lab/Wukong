@@ -8,7 +8,7 @@ The Static Scheduler and KV Store Proxy can be installed by simply cloning this 
 
 A majority of the required AWS infrastructure can be created using the provided `aws_setup.py` script in `Wukong/Static Scheduler/install/` directory. Please be sure to read through the `wukong_setup_config.yaml` configuration file located in the same directory prior to running the script. In particular, your public IP address should be added to the configuration file if you'd like SSH to be enabled from your machine to VMs created in the Wukong VPC.
 
-There is a public AWS EC2 AMI available in the `us-east-1` (Northern Virginia) region with ID `TBD`. This AMI can be used to quickly create the Wukong Static Scheduler and Key-Value Store Proxy (two separate VMs). 
+There is a public AWS EC2 AMI available in the `us-east-1` (Northern Virginia) region with ID `TBD`. This AMI can be used to quickly create the Wukong Static Scheduler and Key-Value Store Proxy (two separate VMs). Use the `ec2-user` username when connecting to the VM via SSH.
 
 Wukong was created from Dask Distributed v1.23.1 and Dask v1.2.2. 
 
