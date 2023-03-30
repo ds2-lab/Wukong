@@ -449,6 +449,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
             "arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9"
         ]
     )
+    print_success("Success!")
 
 
 # def setup_aws_fargate(aws_region : str, wukong_ecs_config : dict):
