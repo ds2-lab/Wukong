@@ -11,16 +11,16 @@ from requests import get
 os.system("color")
 
 # Set up logging.
-import logging 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+# import logging 
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
+# formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
 
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-ch.setFormatter(formatter)
+# ch = logging.StreamHandler()
+# ch.setLevel(logging.DEBUG)
+# ch.setFormatter(formatter)
 
-logger.addHandler(ch)
+# logger.addHandler(ch)
 
 PATH_PROMPT = "Please enter the path to the Wukong Setup Configuration File. Enter nothing for default (same directory as this script).\n> "
 
@@ -120,7 +120,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     #assert(len(lambda_security_group_name) >= 1 and len(lambda_security_group_name) <= 64)
     assert(len(serverful_security_group_name) >= 1 and len(serverful_security_group_name) <= 64)
 
-    logger.info("Creating VPC now...")
+    print("Creating VPC now...")
 
     # Create the VPC.
     create_vpc_response = ec2_client.create_vpc(
@@ -135,8 +135,8 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     vpc = ec2_resource.Vpc(create_vpc_response["Vpc"]["VpcId"])
     vpc.wait_until_available()
 
-    logger.info("Successfully created a VPC. VPC ID: " + vpc.id)
-    logger.info("Next, creating the public subnet...")
+    print("Successfully created a VPC. VPC ID: " + vpc.id)
+    print("Next, creating the public subnet...")
 
     # Create the public subnet (used by EC2 and AWS Fargate).
     public_subnet = vpc.create_subnet(
@@ -149,18 +149,18 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
             }]}])
     ec2_client.modify_subnet_attribute(SubnetId = public_subnet.id, MapPublicIpOnLaunch = {'Value': True})
 
-    logger.info("Successfully created the public subnet. Subnet ID: " + public_subnet.id)
+    print("Successfully created the public subnet. Subnet ID: " + public_subnet.id)
     
     # We print a different message depending on how many private subnets we're creating.
     if len(PrivateSubnetCidrBlocks) == 1:
-        logger.info("Next, creating 1 private subnet...")
+        print("Next, creating 1 private subnet...")
     else:
-        logger.info("Next, creating {} private subnets...".format(len(PrivateSubnetCidrBlocks))) 
+        print("Next, creating {} private subnets...".format(len(PrivateSubnetCidrBlocks))) 
     
     # Create all of the private subnets.
     private_subnets = list()
     for i, PrivateSubnetCidrBlock in enumerate(PrivateSubnetCidrBlocks):
-        logger.info("Creating private subnet #%d with CIDR block %s..." % (i, PrivateSubnetCidrBlock))
+        print("Creating private subnet #%d with CIDR block %s..." % (i, PrivateSubnetCidrBlock))
         private_subnet = vpc.create_subnet(
             CidrBlock = PrivateSubnetCidrBlock,
             TagSpecifications = [{
@@ -175,11 +175,11 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     # We print a different message depending on how many private subnets we created.
     if len(private_subnets) == 1:
         private_subnet = private_subnets[0]
-        logger.info("Successfully created 1 private subnet. Subnet ID: " + private_subnet.id)
+        print("Successfully created 1 private subnet. Subnet ID: " + private_subnet.id)
     else:
         private_subnet_ids = [private_subnet.id for private_subnet in private_subnets]
-        logger.info("Successfully created {} private subnets. Subnet IDs: " + str(private_subnet_ids))
-    logger.info("Next, creating an internet gateway...")
+        print("Successfully created {} private subnets. Subnet IDs: " + str(private_subnet_ids))
+    print("Next, creating an internet gateway...")
     
     # Create and attach an internet gateway.
     create_internet_gateway_response = ec2_client.create_internet_gateway(
@@ -193,8 +193,8 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     internet_gateway_id = create_internet_gateway_response["InternetGateway"]["InternetGatewayId"]
     vpc.attach_internet_gateway(InternetGatewayId = internet_gateway_id)
 
-    logger.info("Successfully created an Internet Gateway and attached it to the VPC. Internet Gateway ID: " + internet_gateway_id)
-    logger.info("Next, allocating elastic IP address and creating NAT gateway...")
+    print("Successfully created an Internet Gateway and attached it to the VPC. Internet Gateway ID: " + internet_gateway_id)
+    print("Next, allocating elastic IP address and creating NAT gateway...")
 
     elastic_ip_response = ec2_client.allocate_address(
         Domain = 'vpc',
@@ -219,9 +219,9 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     # print(nat_gateway)
     nat_gateway_id = nat_gateway["NatGateway"]["NatGatewayId"]
 
-    logger.info("Successfully allocated elastic IP address and created NAT gateway. NAT Gateway ID: " + nat_gateway_id)
-    logger.info("Next, creating route tables and associated public route table with public subnet.")
-    logger.info("But first, sleeping for ~30 seconds so that NAT gateway can be created.")
+    print("Successfully allocated elastic IP address and created NAT gateway. NAT Gateway ID: " + nat_gateway_id)
+    print("Next, creating route tables and associated public route table with public subnet.")
+    print("But first, sleeping for ~30 seconds so that NAT gateway can be created.")
 
     time.sleep(30)
 
@@ -247,13 +247,13 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
         GatewayId = nat_gateway_id
     )
 
-    logger.info("Successfully created the route tables and associated public route table with public subnet.")
+    print("Successfully created the route tables and associated public route table with public subnet.")
 
     # We print a different message depending on how many private subnets we created.
     if len(private_subnets) == 1:
-        logger.info("Next, associating private route table with the private subnet.")
+        print("Next, associating private route table with the private subnet.")
     else:
-        logger.info("Next, associating private route table with the private subnets.")
+        print("Next, associating private route table with the private subnets.")
     
     # # Associate the private route table with each private subnet.
     for private_subnet in private_subnets:
@@ -261,10 +261,10 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     
     # We print a different message depending on how many private subnets we created.
     if len(private_subnets) == 1:
-        logger.info("Successfully associated the private route table with the private subnet.")
+        print("Successfully associated the private route table with the private subnet.")
     else:
-        logger.info("Successfully associated the private route table with the private subnets.")
-    logger.info("Next, creating and configuring the security group...")
+        print("Successfully associated the private route table with the private subnets.")
+    print("Next, creating and configuring the security group...")
 
     # The security group used by AWS Lambda functions.
     #lambda_security_group = ec2_resource.create_security_group(
@@ -303,10 +303,10 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     ])
     #serverful_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
 
-    logger.info("Successfully created and configured the security group.\n\n")
-    logger.info("==========================")
-    logger.info("Wukong VPC setup complete.")
-    logger.info("==========================")
+    print("Successfully created and configured the security group.\n\n")
+    print("==========================")
+    print("Wukong VPC setup complete.")
+    print("==========================")
 
     return {
         "VpcId": vpc.id,
@@ -339,7 +339,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
             only supported when running on Linux.
     
     """
-    logger.info("Next, we must create the AWS Lambda function that acts as the Wukong Executor.")
+    print("Next, we must create the AWS Lambda function that acts as the Wukong Executor.")
     
     executor_function_name = wukong_lambda_config["executor_function_name"]
     invoker_function_name = wukong_lambda_config["invoker_function_name"]
@@ -368,7 +368,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
         lambda_client = boto3.client("lambda", region_name = aws_region)
         iam = boto3.client('iam')
 
-    logger.info("First, we need to create an IAM role for the AWS Lambda functions. Creating role now...")
+    print("First, we need to create an IAM role for the AWS Lambda functions. Creating role now...")
     description = "Role used for AWS Lambda functions within the Wukong serverless DAG execution framework."
 
     # This allows AWS Lambda functions to assume the role that we're creating here.
@@ -422,8 +422,8 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
         PolicyArn = 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole',
         RoleName = iam_role_name)                              
 
-    logger.info("Successfully created and configured IAM role for AWS Lambda functions.")
-    logger.info("Next, creating AWS Lambda function for Wukong Executor...")
+    print("Successfully created and configured IAM role for AWS Lambda functions.")
+    print("Next, creating AWS Lambda function for Wukong Executor...")
     lambda_client.create_function(
         Code = {"ZipFile": open("./wukong_aws_lambda_code.zip", "rb").read()},
         FunctionName = executor_function_name,
@@ -456,12 +456,12 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
 
 #     ecs_client = boto3.client('ecs', region_name = aws_region)
 
-#     logger.info("First, creating the ECS Fargate cluster...")
+#     print("First, creating the ECS Fargate cluster...")
 
 #     ecs_client.create_cluster(clusterName = cluster_name, capacityProviders = ["FARGATE", "FARGATE_SPOT"])
 
-#     logger.info("Successfully created the ECS Fargate cluster.")
-#     logger.info("Next, registering a task definition to use as the Fargate Redis nodes...")
+#     print("Successfully created the ECS Fargate cluster.")
+#     print("Next, registering a task definition to use as the Fargate Redis nodes...")
 
 #     ecs_client.register_task_definition(
 #         family = 'Wukong',
@@ -496,7 +496,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
 #         ]
 #     )
 
-#     logger.info("Successfully registered the task definition!")
+#     print("Successfully registered the task definition!")
 
 if __name__ == "__main__":
     print("Welcome to the Wukong Interactive Setup. Please note that many of the components created for running Wukong")
@@ -637,6 +637,8 @@ if __name__ == "__main__":
                 print_error("Failed to find any private subnets in the VPC with name=\"%s\"." % vpc_name, no_color = no_color, no_header = False)
                 print_error("Terminating now.", no_color = no_color, no_header = True)
                 exit(1)
+            else:
+                print("Successfully retrieved private subnet IDs from AWS: %s" % private_subnet_ids)
         else:
             private_subnet_ids = wukong_vpc_config["vpc_private_subnet_ids"] 
 
