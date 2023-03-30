@@ -53,6 +53,11 @@ def print_warning(msg, no_header = False, no_color = False):
         msg = "[WARNING] " + msg
     print(msg)
 
+def print_success(msg, no_color = False):
+    if not no_color:
+        msg = bcolors.OKGREEN + msg + bcolors.ENDC
+    print(msg)
+    
 def get_arguments():
     parser = argparse.ArgumentParser()
     
@@ -99,7 +104,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
         print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % aws_profile)
         try:
             session = boto3.Session(profile_name = aws_profile)
-            print("Success!")
+            print_success("Success!", no_color = no_color)
         except Exception as ex: 
             print_error("Exception encountered while trying to use AWS credentials profile \"%s\"." % aws_profile, no_color = no_color, no_header = False)
             raise ex 
@@ -135,7 +140,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     vpc = ec2_resource.Vpc(create_vpc_response["Vpc"]["VpcId"])
     vpc.wait_until_available()
 
-    print("Successfully created a VPC. VPC ID: " + vpc.id)
+    print_success("Successfully created a VPC. VPC ID: " + vpc.id, no_color=no_color)
     print("Next, creating the public subnet...")
 
     # Create the public subnet (used by EC2 and AWS Fargate).
@@ -149,7 +154,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
             }]}])
     ec2_client.modify_subnet_attribute(SubnetId = public_subnet.id, MapPublicIpOnLaunch = {'Value': True})
 
-    print("Successfully created the public subnet. Subnet ID: " + public_subnet.id)
+    print_success("Successfully created the public subnet. Subnet ID: " + public_subnet.id, no_color=no_color)
     
     # We print a different message depending on how many private subnets we're creating.
     if len(PrivateSubnetCidrBlocks) == 1:
@@ -175,10 +180,10 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     # We print a different message depending on how many private subnets we created.
     if len(private_subnets) == 1:
         private_subnet = private_subnets[0]
-        print("Successfully created 1 private subnet. Subnet ID: " + private_subnet.id)
+        print_success("Successfully created 1 private subnet. Subnet ID: " + private_subnet.id, no_color=no_color)
     else:
         private_subnet_ids = [private_subnet.id for private_subnet in private_subnets]
-        print("Successfully created {} private subnets. Subnet IDs: " + str(private_subnet_ids))
+        print_success("Successfully created {} private subnets. Subnet IDs: " + str(private_subnet_ids), no_color=no_color)
     print("Next, creating an internet gateway...")
     
     # Create and attach an internet gateway.
@@ -193,7 +198,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     internet_gateway_id = create_internet_gateway_response["InternetGateway"]["InternetGatewayId"]
     vpc.attach_internet_gateway(InternetGatewayId = internet_gateway_id)
 
-    print("Successfully created an Internet Gateway and attached it to the VPC. Internet Gateway ID: " + internet_gateway_id)
+    print_success("Successfully created an Internet Gateway and attached it to the VPC. Internet Gateway ID: " + internet_gateway_id, no_color=no_color)
     print("Next, allocating elastic IP address and creating NAT gateway...")
 
     elastic_ip_response = ec2_client.allocate_address(
@@ -219,11 +224,11 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     # print(nat_gateway)
     nat_gateway_id = nat_gateway["NatGateway"]["NatGatewayId"]
 
-    print("Successfully allocated elastic IP address and created NAT gateway. NAT Gateway ID: " + nat_gateway_id)
+    print_success("Successfully allocated elastic IP address and created NAT gateway. NAT Gateway ID: " + nat_gateway_id, no_color=no_color)
     print("Next, creating route tables and associated public route table with public subnet.")
-    print("But first, sleeping for ~30 seconds so that NAT gateway can be created.")
+    print("But first, sleeping for ~45 seconds so that the NAT gateway can be created.")
 
-    time.sleep(30)
+    time.sleep(45)
 
     # The VPC creates a route table, so we have one to begin with. We use this as the public route table.
     initial_route_table = list(vpc.route_tables.all())[0] 
@@ -247,7 +252,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
         GatewayId = nat_gateway_id
     )
 
-    print("Successfully created the route tables and associated public route table with public subnet.")
+    print_success("Successfully created the route tables and associated public route table with public subnet.", no_color=no_color)
 
     # We print a different message depending on how many private subnets we created.
     if len(private_subnets) == 1:
@@ -261,9 +266,9 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     
     # We print a different message depending on how many private subnets we created.
     if len(private_subnets) == 1:
-        print("Successfully associated the private route table with the private subnet.")
+        print_success("Successfully associated the private route table with the private subnet.", no_color=no_color)
     else:
-        print("Successfully associated the private route table with the private subnets.")
+        print_success("Successfully associated the private route table with the private subnets.", no_color=no_color)
     print("Next, creating and configuring the security group...")
 
     # The security group used by AWS Lambda functions.
@@ -303,10 +308,10 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     ])
     #serverful_security_group.authorize_ingress(CidrIp = '0.0.0.0/0', IpProtocol = '-1', FromPort = 0, ToPort = 65535)
 
-    print("Successfully created and configured the security group.\n\n")
-    print("==========================")
-    print("Wukong VPC setup complete.")
-    print("==========================")
+    print_success("Successfully created and configured the security group.\n\n", no_color=no_color)
+    print_success("==========================", no_color=no_color)
+    print_success("Wukong VPC setup complete.", no_color=no_color)
+    print_success("==========================", no_color=no_color)
 
     return {
         "VpcId": vpc.id,
@@ -357,7 +362,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
         print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % aws_profile)
         try:
             session = boto3.Session(profile_name = aws_profile)
-            print("Success!")
+            print_success("Success!", no_color=no_color)
         except Exception as ex: 
             print_error("Exception encountered while trying to use AWS credentials profile \"%s\"." % aws_profile, no_color = no_color, no_header = False)
             raise ex 
@@ -406,7 +411,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
             exit(1) 
         
     role_arn = role_response['Role']['Arn']
-    print("Success! Next, attaching required IAM role polices.")
+    print_success("Success! Next, attaching required IAM role polices.", no_color=no_color)
     
     # Now we must attach all of the required policies.
     iam.attach_role_policy(
@@ -422,7 +427,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
         PolicyArn = 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole',
         RoleName = iam_role_name)                              
 
-    print("Successfully created and configured IAM role for AWS Lambda functions.")
+    print_success("Successfully created and configured IAM role for AWS Lambda functions.", no_color=no_color)
     print("Next, creating AWS Lambda function for Wukong Executor...")
     lambda_client.create_function(
         Code = {"ZipFile": open("./wukong_aws_lambda_code.zip", "rb").read()},
@@ -503,6 +508,11 @@ if __name__ == "__main__":
     print("cost money (e.g., NAT gateways, elastic IP addresses, etc.). Be aware that your account will begin incurring")
     print("cost once these components are setup.")
     
+    print_warning("Warning (color+header)", no_color=False, no_header=False)
+    print_warning("Warning (color)", no_color=False, no_header=True)
+    print_warning("Warning (header)", no_color=True, no_header=False)
+    print_warning("Warning", no_color=True, no_header=True)
+    
     command_line_args = get_arguments()
     no_color = command_line_args.no_color
     aws_profile_name = command_line_args.aws_profile
@@ -520,13 +530,15 @@ if __name__ == "__main__":
     try:
         with open(config_file_path) as f:
             wukong_setup_config = yaml.load(f, Loader = yaml.FullLoader)
-            print("Successfully loaded configuration file at \"%s\"" % config_file_path)
+            print_success("Successfully loaded configuration file at \"%s\"" % config_file_path, no_color=no_color)
     except FileNotFoundError as ex:
-        print("Failed to load configuration file \"%s\". Please verify that the file exists." % config_file_path)
-        print("The actual exception that was encountered:\n", ex)
+        print_error("Failed to load configuration file \"%s\". Please verify that the file exists." % config_file_path, no_color=no_color, no_header=False)
+        print_error("The actual exception that was encountered:", no_color=no_color, no_header=True)
+        raise ex 
     except yaml.YAMLError as ex:
-        print("Error parsing configuration file \"%s\". Please verify that the file does not contain any YAML errors." % config_file_path)
-        print("The actual exception that was encountered:\n", ex)
+        print_error("Error parsing configuration file \"%s\". Please verify that the file does not contain any YAML errors." % config_file_path, no_color=no_color, no_header=False)
+        print_error("The actual exception that was encountered:\n", no_color=no_color, no_header=True)
+        raise ex 
     
     aws_region = wukong_setup_config["aws_region"]
     user_public_ip = wukong_setup_config["user_public_ip"]
@@ -553,21 +565,23 @@ if __name__ == "__main__":
         # then we will attempt to retrieve them from AWS by examining the route tables within the VPC.
         # Specifically, we will look for route tables routing a subnet to a NAT Gateway, as these are
         # the private subnets. Public subnets will have a route to an Internet Gateway.
-        if "private_subnet_ids" not in wukong_vpc_config or len(wukong_vpc_config["vpc_private_subnet_ids"]) == 0:
+        if "private_subnet_ids" not in wukong_vpc_config or len(wukong_vpc_config["private_subnet_ids"]) == 0:
             print("Attempting to automatically retrieve private subnet IDs now...")
             
             if aws_profile_name is not None:
                 print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % aws_profile_name)
                 try:
                     session = boto3.Session(profile_name = aws_profile_name)
-                    print("Success!")
+                    print_success("Success!", no_color=no_color)
                 except Exception as ex: 
                     print_error("Exception encountered while trying to use AWS credentials profile \"%s\"." % aws_profile_name, no_color = no_color, no_header = False)
                     raise ex                 
                 
                 ec2 = session.resource('ec2')
             else:
+                print("Creating EC2 clientn now...")
                 ec2 = boto3.resource('ec2')
+                print_success("Success!", no_color=no_color)
             
             vpc_name = wukong_vpc_config['Name'] # Grab the VPC name from the config. Hopefully it already exists... 
             try:
@@ -577,6 +591,7 @@ if __name__ == "__main__":
                 print_error("Exception encountered while attempting to retrieve VPC with name \"%s\"." % vpc_name, no_color = no_color, no_header = False)
                 raise ex
             
+            vpc_response = list(vpc_response)
             if len(vpc_response) == 0:
                 raise ValueError("Failed to find existing VPC with name \"%s\". The VPC must already exist if you are going to skip the VPC-creation step." % vpc_name)
             
@@ -638,9 +653,9 @@ if __name__ == "__main__":
                 print_error("Terminating now.", no_color = no_color, no_header = True)
                 exit(1)
             else:
-                print("Successfully retrieved private subnet IDs from AWS: %s" % private_subnet_ids)
+                print_success("Successfully retrieved private subnet IDs from AWS: %s" % private_subnet_ids, no_color=no_color)
         else:
-            private_subnet_ids = wukong_vpc_config["vpc_private_subnet_ids"] 
+            private_subnet_ids = wukong_vpc_config["private_subnet_ids"] 
 
     # Step 2: Create AWS Lambda functions.
     if not command_line_args.skip_aws_lambda_creation:
