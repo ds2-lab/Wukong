@@ -1,3 +1,8 @@
+aws_credentials:
+  aws_access_key_id: XXXXXXXXXXXXXXXXXXXX 
+
+  aws_secret_access_key: YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+
 # Configure the AWS Lambda resources used by Wukong.
 aws_lambda:
   # If this is set to <true>, then the Static Scheduler will use the AWS API to retrieve the names of the AWS Lambda functions
@@ -5,7 +10,7 @@ aws_lambda:
   # 
   # If you manually created the AWS Lambda functions yourself, then you should set this to false and specify the names of the functions.
   # Note that the user-specified names will be ignored when this is true.
-  retrieve_function_names_from_cloudformation: true 
+  retrieve_function_names_from_cloudformation: false 
 
   # This is the name given to the AWS SAM application deployed for Wukong. This should be the same as the name used when deploying the
   # AWS SAM application or the Static Scheduler will be unable to automatically retrieve the AWS Lambda function names.
