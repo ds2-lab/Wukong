@@ -397,16 +397,16 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
     try:
         role_response = iam.create_role(
             RoleName = iam_role_name, Description = description, AssumeRolePolicyDocument = json.dumps(AssumeRolePolicyDocument)) 
-    except botocore.errorfactory.EntityAlreadyExistsException:
-        print_warning("Exception encountered when creating IAM role for the AWS Lambda functions: `botocore.errorfactory.EntityAlreadyExistsException`", no_color = no_color, no_header = False)
+    except iam.exceptions.EntityAlreadyExistsException:
+        print_warning("Exception encountered when creating IAM role for the AWS Lambda functions: `iam.exceptions.EntityAlreadyExistsException`", no_color = no_color, no_header = False)
         print_warning("Attempting to fetch ARN of existing role with name \"%s\" now..." % iam_role_name, no_color = no_color, no_header = True)
         
         try:
             role_response = iam.get_role(RoleName = iam_role_name)
-        except botocore.errorfactory.NoSuchEntityException as ex:
+        except iam.exceptions.NoSuchEntityException as ex:
             # This really shouldn't happen, as we tried to create the role and were told that the role exists.
             # So, we'll just terminate the script here. The user needs to figure out what's going on at this point. 
-            print_error("Exception encountered while attempting to fetch existing IAM role with name \"%s\": `botocore.errorfactory.NoSuchEntityException`" % iam_role_name, no_color = no_color, no_header = False)
+            print_error("Exception encountered while attempting to fetch existing IAM role with name \"%s\": `iam.exceptions.NoSuchEntityException`" % iam_role_name, no_color = no_color, no_header = False)
             print_error("Please verify that the AWS role exists and re-execute the script. Terminating now.", no_color = no_color, no_header = True)
             exit(1) 
         
@@ -507,11 +507,6 @@ if __name__ == "__main__":
     print("Welcome to the Wukong Interactive Setup. Please note that many of the components created for running Wukong")
     print("cost money (e.g., NAT gateways, elastic IP addresses, etc.). Be aware that your account will begin incurring")
     print("cost once these components are setup.")
-    
-    print_warning("Warning (color+header)", no_color=False, no_header=False)
-    print_warning("Warning (color)", no_color=False, no_header=True)
-    print_warning("Warning (header)", no_color=True, no_header=False)
-    print_warning("Warning", no_color=True, no_header=True)
     
     command_line_args = get_arguments()
     no_color = command_line_args.no_color
