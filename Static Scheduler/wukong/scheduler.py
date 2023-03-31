@@ -1312,10 +1312,20 @@ class Scheduler(ServerNode):
         # Track info such as how many times each Fargate node has been selected.
         self.fargate_metrics = dict()
 
+        with open("./wukong-config.yaml") as f:
+            self.wukong_config = yaml.load(f, Loader = yaml.FullLoader) 
+            self.aws_config = self.wukong_config["aws_lambda"]
+            
+            # Specifies an AWS access key associated with an IAM account.
+            self.aws_access_key_id = self.wukong_config["credentials"]["aws_access_key_id"]
+            
+            # Specifies the secret key associated with the access key. This is essentially the "password" for the access key.
+            self.aws_secret_access_key = self.wukong_config["credentials"]["aws_secret_access_key"]
+
         self.aws_region = aws_region
-        self.lambda_client = boto3.client('lambda', region_name=self.aws_region)
-        self.ecs_client = boto3.client('ecs', region_name = self.aws_region)
-        self.ec2_client = boto3.client('ec2', region_name = self.aws_region)
+        self.lambda_client = boto3.client('lambda', region_name=self.aws_region, aws_access_key_id = self.aws_access_key_id, aws_secret_access_key = self.aws_secret_access_key)
+        self.ecs_client = boto3.client('ecs', region_name = self.aws_region, aws_access_key_id = self.aws_access_key_id, aws_secret_access_key = self.aws_secret_access_key)
+        self.ec2_client = boto3.client('ec2', region_name = self.aws_region, aws_access_key_id = self.aws_access_key_id, aws_secret_access_key = self.aws_secret_access_key)
         self.ecs_cluster_name = ecs_cluster_name
         self.ecs_task_definition = ecs_task_definition
         self.ecs_network_configuration = ecs_network_configuration
@@ -1373,10 +1383,6 @@ class Scheduler(ServerNode):
         self.executed_tasks = [] 
         self.executed_tasks_old = dict()
         self.number_update_graph_calls = 0
-
-        with open("./wukong-config.yaml") as f:
-            self.wukong_config = yaml.load(f, Loader = yaml.FullLoader) 
-            self.aws_config = self.wukong_config["aws_lambda"]
         
         resolve_via_cloudformation = self.aws_config["retrieve_function_names_from_cloudformation"]
 
@@ -1384,7 +1390,7 @@ class Scheduler(ServerNode):
         if resolve_via_cloudformation:
             aws_sam_app_name = self.aws_config["aws_sam_app_name"]
             print("Retrieving AWS Lambda function names from CloudFormation. AWS SAM app name: \"{}\"".format(aws_sam_app_name))
-            cloudformation_client = boto3.client('cloudformation', region_name = self.aws_region)
+            cloudformation_client = boto3.client('cloudformation', region_name = self.aws_region, aws_access_key_id = self.aws_access_key_id, aws_secret_access_key = self.aws_secret_access_key)
 
             stacks_response = cloudformation_client.describe_stacks(StackName = aws_sam_app_name)
             stack_outputs = stacks_response["Stacks"][0]["Outputs"]
@@ -1551,7 +1557,9 @@ class Scheduler(ServerNode):
                                                            executor_function_name = self.executor_function_name,
                                                            invoker_function_name = self.invoker_function_name,
                                                            use_invoker_lambdas_threshold = self.use_invoker_lambdas_threshold,
-                                                           force_use_invoker_lambdas = self.force_use_invoker_lambdas)
+                                                           force_use_invoker_lambdas = self.force_use_invoker_lambdas,
+                                                           aws_access_key_id = self.aws_access_key_id,
+                                                           aws_secret_access_key = self.aws_secret_access_key)
         self.batched_lambda_invoker.start(self.lambda_client, scheduler_address = self.address)        
         # Write the address to Elasticache so the Lambda function can access it without being told explicitly.
         address_key = "scheduler-address"

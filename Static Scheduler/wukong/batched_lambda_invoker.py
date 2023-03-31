@@ -63,6 +63,8 @@ class BatchedLambdaInvoker(object):
         minimum_tasks_for_multiple_invokers = 8, 
         aws_region = 'us-east-1', 
         force_use_invoker_lambdas = False,
+        aws_access_key_id = None,
+        aws_secret_access_key = None,
         use_invoker_lambdas_threshold = 10000):
         # XXX is the loop arg useful?
         self.loop = loop or IOLoop.current()
@@ -99,6 +101,8 @@ class BatchedLambdaInvoker(object):
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
         self.serializers = serializers
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
         #self.ntp_client = ntplib.NTPClient()
 
     def start(self, lambda_client, scheduler_address):
@@ -114,7 +118,7 @@ class BatchedLambdaInvoker(object):
             #(self, conn, chunk_size, scheduler_address, redis_channel_names)
             receiving_conn, sending_conn = Pipe()
             
-            invoker = Process(target = self.invoker_polling_process, args = (i, receiving_conn, self.scheduler_address, self.redis_channel_names, self.aws_region, self.redis_address))
+            invoker = Process(target = self.invoker_polling_process, args = (i, receiving_conn, self.scheduler_address, self.redis_channel_names, self.aws_region, self.redis_address, self.aws_access_key_id, self.aws_secret_access_key))
             invoker.daemon = True 
             self.lambda_pipes.append(sending_conn)
             self.lambda_invokers.append(invoker)
@@ -257,9 +261,9 @@ class BatchedLambdaInvoker(object):
                     print("                               Serialization took {} seconds. Invocation took {} seconds.".format(total_time_spent_serializing, total_time_spent_invoking))
                     print("                               Total Lambdas Invoked: {}. Total # Tasks Invoked: {}".format(self.total_lambdas_invoked, self.num_tasks_invoked))
                     print("                               The Scheduler has spent {} seconds calling invoke() so far.".format(self.time_spent_invoking))
-            except Exception:
-                logger.exception("Error in batched write")
-                print("Error in batched write.")
+            except Exception as ex:
+                print("[ERROR] Wukong Lambda Invoker has encountered an exception while invoking serverless functions.")
+                print("[ERROR] Exception: %s" % str(ex))
                 break
             finally:
                 payload = None  # lose ref
@@ -307,14 +311,14 @@ class BatchedLambdaInvoker(object):
         for conn in self.lambda_pipes:
             conn.close()        
 
-    def invoker_polling_process(self, ID, conn, scheduler_address, redis_channel_names, aws_region, redis_address):
+    def invoker_polling_process(self, ID, conn, scheduler_address, redis_channel_names, aws_region, redis_address, aws_access_key_id, aws_secret_access_key):
         """ This function runs as a separate process, invoking Lambda functions in parallel.
             
             It continually polls the given Connection object, checking for new payloads. If
             there are no messages in the Pipe, then the process sleeps. The sleep time increases 
             for consecutive empty Pipes."""
         print("[ {} ] - Lambda Invoker Process {} - INFO: Lambda Invoker Process began executing...".format(datetime.datetime.utcnow(), ID))
-        lambda_client = boto3.client('lambda', region_name=aws_region)
+        lambda_client = boto3.client('lambda', region_name=aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
         current_redis_channel_index = 0
         expected_messages = None                      # This is how many messages we are expecting to get.
         base_sleep_interval = 0.005                   # The starting sleep interval.
