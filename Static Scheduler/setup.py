@@ -19,26 +19,26 @@ for r in requires:
     else:
         install_requires.append(r)
 
-setup(name='distributed',
+setup(name='wukong',
       version=versioneer.get_version(),
       cmdclass=versioneer.get_cmdclass(),
-      description='Distributed scheduler for Dask',
-      url='https://distributed.readthedocs.io/en/latest/',
-      maintainer='Matthew Rocklin',
-      maintainer_email='mrocklin@gmail.com',
+      description='Static Scheduler for Wukong',
+      url='https://github.com/mason-leap-lab/Wukong/tree/socc2020',
+      maintainer='Benjamin Carver',
+      maintainer_email='bcarver2@gmu.edu',
       license='BSD',
       package_data={'': ['templates/index.html', 'template.html'],
-                    'distributed': ['bokeh/templates/*.html']},
+                    'wukong': ['bokeh/templates/*.html']},
       include_package_data=True,
       install_requires=install_requires,
       extras_require=extras_require,
-      packages=['distributed',
-                'distributed.bokeh',
-                'distributed.cli',
-                'distributed.comm',
-                'distributed.deploy',
-                'distributed.diagnostics',
-                'distributed.protocol'],
+      packages=['wukong',
+                'wukong.bokeh',
+                'wukong.cli',
+                'wukong.comm',
+                'wukong.deploy',
+                'wukong.diagnostics',
+                'wukong.protocol'],
       long_description=(open('README.rst').read() if os.path.exists('README.rst')
                         else ''),
       classifiers=[
@@ -57,11 +57,11 @@ setup(name='distributed',
       ],
       entry_points='''
         [console_scripts]
-        dask-ssh=distributed.cli.dask_ssh:go
-        dask-submit=distributed.cli.dask_submit:go
-        dask-remote=distributed.cli.dask_remote:go
-        dask-scheduler=distributed.cli.dask_scheduler:go
-        dask-worker=distributed.cli.dask_worker:go
-        dask-mpi=distributed.cli.dask_mpi:go
+        dask-ssh=wukong.cli.dask_ssh:go
+        dask-submit=wukong.cli.dask_submit:go
+        dask-remote=wukong.cli.dask_remote:go
+        dask-scheduler=wukong.cli.dask_scheduler:go
+        dask-worker=wukong.cli.dask_worker:go
+        dask-mpi=wukong.cli.dask_mpi:go
       ''',
       zip_safe=False)

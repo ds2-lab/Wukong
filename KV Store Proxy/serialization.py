@@ -293,7 +293,7 @@ def extract_serialize(x):
 
    Examples
    --------
-   >>> from distributed.protocol import to_serialize
+   >>> from wukong.protocol import to_serialize
    >>> msg = {'op': 'update', 'data': to_serialize(123)}
    >>> extract_serialize(msg)
    ({'op': 'update'}, {('data',): <Serialize: 123>}, set())
@@ -1093,7 +1093,7 @@ def register_generic(cls):
     Examples
     --------
     >>> import sklearn.base
-    >>> from distributed.protocol import register_generic
+    >>> from wukong.protocol import register_generic
     >>> register_generic(sklearn.base.BaseEstimator)
     See Also
     --------

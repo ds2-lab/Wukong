@@ -11,7 +11,7 @@ Everytime you run a job on Wukong, you'll need to create an instance of the ``Lo
     :linenos:
 
     import dask.array as da
-    from distributed import LocalCluster, Client
+    from wukong import LocalCluster, Client
     local_cluster = LocalCluster(host='0.0.0.0:8786',
                     proxy_address = '3.83.198.204', 
                     num_fargate_nodes = 10) 

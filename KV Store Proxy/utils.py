@@ -74,7 +74,7 @@ def typename(typ):
     """ Return name of type
     Examples
     --------
-    >>> from distributed import Scheduler
+    >>> from wukong import Scheduler
     >>> typename(Scheduler)
     'distributed.scheduler.Scheduler'
     """
@@ -126,8 +126,8 @@ def truncate_exception(e, n=10000):
 def get_traceback():
    exc_type, exc_value, exc_traceback = sys.exc_info()
    bad = [
-      os.path.join("distributed", "worker"),
-      os.path.join("distributed", "scheduler"),
+      os.path.join("wukong", "worker"),
+      os.path.join("wukong", "scheduler"),
       os.path.join("tornado", "gen.py"),
       os.path.join("concurrent", "futures"),
    ]
