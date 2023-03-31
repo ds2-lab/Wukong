@@ -95,8 +95,8 @@ LocalCluster(object):
 import dask.array as da
 from dask import delayed
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -117,8 +117,8 @@ print("Result: %d" % result)
 import dask.array as da
 from dask import delayed
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -159,8 +159,8 @@ print("Result: %d" % result2)
 from dask import delayed 
 import operator 
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -176,8 +176,8 @@ L[0].compute()
 ```python
 import dask.array as da
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -193,8 +193,8 @@ v.compute()
 ```python
 import dask.array as da
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -210,8 +210,8 @@ v.compute()
 ``` python
 import dask.array as da
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -233,8 +233,8 @@ from sklearn.svm import SVC
 import dask_ml.datasets
 from dask_ml.wrappers import ParallelPostFit
 from wukong import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
                   use_fargate = False) 
 client = Client(local_cluster)
 
