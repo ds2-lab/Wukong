@@ -8,7 +8,6 @@ import time
 import random
 from dask.core import istask
 import sys
-import pickle 
 import queue 
 import logging
 import os
@@ -3792,11 +3791,11 @@ def deserialize_payload(payload):
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
    """ Deserialize task inputs and regularize to func, args, kwargs """
    if function is not None:
-      function = pickle.loads(function)
+      function = cloudpickle.loads(function)
    if args:
-      args = pickle.loads(args)
+      args = cloudpickle.loads(args)
    if kwargs:
-      kwargs = pickle.loads(kwargs)
+      kwargs = cloudpickle.loads(kwargs)
 
    if task is not no_value:
       assert not function and not args and not kwargs

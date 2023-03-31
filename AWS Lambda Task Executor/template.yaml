@@ -10,7 +10,7 @@ Globals:
   Function:
     Layers:
       - arn:aws:lambda:us-east-1:668099181075:layer:AWSLambda-Python37-SciPy1x:2
-      - arn:aws:lambda:us-east-1:561589293384:layer:DaskDependenciesAndXRay:6
+      - arn:aws:lambda:us-east-1:561589293384:layer:DaskDependenciesAndXRay:9
       - arn:aws:lambda:us-east-1:561589293384:layer:DaskLayer2:2
       - arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9
 
