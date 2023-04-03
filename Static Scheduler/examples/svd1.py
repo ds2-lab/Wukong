@@ -5,17 +5,16 @@ import numpy as np
 import pprint
 
 import dask 
+import dask.array as da
 import time 
 
-import operator
-
-##################
-# Tree Reduction #
-##################
+#####################################
+# SVD of a "Tall-and-Skinny" Matrix #
+#####################################
 
 # NOTES:
 # - These scripts use the `wukong-config.yaml` file located in "/home/ec2-user/Wukong/Static Scheduler/wukong-config.yaml".
-#   Please modify the `wukong_config_path` key-word argument passed to the `LocalCluster` instance on line 38 if your
+#   Please modify the `wukong_config_path` key-word argument passed to the `LocalCluster` instance on line 37 if your
 #   configuration file is located somewhere else. 
 #
 # - Assuming you're just running this from the cloned repository without installing any Python modules...
@@ -41,11 +40,12 @@ lc = LocalCluster(
   use_fargate = False)
 client = Client(lc)
 
-L = range(1024)
-while len(L) > 1:
-  L = list(map(delayed(operator.add), L[0::2], L[1::2]))
+# Compute the SVD of 'Tall-and-Skinny' Matrix 
+X = da.random.random((200000, 1000), chunks=(10000, 1000))
+u, s, v = da.linalg.svd(X)
 
-result = L[0].compute(scheduler = client.get)
+# Start the computation.
+result = v.compute(scheduler = client.get)
 print("Result: %d" % result) 
 
 lc.close()
