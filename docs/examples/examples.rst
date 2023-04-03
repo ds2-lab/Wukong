@@ -45,7 +45,7 @@ Here, we are computing the SVD of a 200,000 x 100 matrix. In this case, we parti
 
     X = da.random.random((200000, 100), chunks=(10000, 100)).persist()
     u, s, v = da.linalg.svd(X)
-    v.compute()  
+    v.compute(scheduler = client.get)
 
 Square Matrix
 """""""""""""
@@ -57,7 +57,7 @@ We can also compute the SVD of a square matrix -- in this case, the input matrix
 
     X = da.random.random((10000, 10000), chunks=(2000, 2000)).persist()
     u, s, v = da.linalg.svd_compressed(X, k=5)
-    v.compute()  
+    v.compute(scheduler = client.get)  
 
 QR Reduction
 ^^^^^^^^^^^^
@@ -67,7 +67,7 @@ QR Reduction
 
     X = da.random.random((128, 128), chunks = (16, 16))
     q, r = da.linalg.qr(X)
-    r.compute()    
+    r.compute(scheduler = client.get)    
 
 Tall-and-Skinny QR Reduction (TSQR)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -79,7 +79,7 @@ We can also compute the tall-and-skinny QR reduction of matrices using Wukong.
 
     X = da.random.random((262_144, 128), chunks = (8192, 128))
     q, r = da.linalg.tsqr(X)
-    r.compute()
+    r.compute(scheduler = client.get)
 
 Cholesky Decomposition
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -97,7 +97,7 @@ Cholesky Decomposition
     
     # Pass 'True' for the 'lower' parameter if you wish to compute the lower cholesky decomposition.
     chol = da.linalg.cholesky(X, lower = False) 
-    chol.compute()
+    chol.compute(scheduler = client.get)
 
 General Matrix Multiplication (GEMM)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -109,7 +109,7 @@ General Matrix Multiplication (GEMM)
     y = da.random.random((10000, 10000), chunks = (2000, 2000))    
     
     z = da.matmul(x, y)
-    z.compute()
+    z.compute(scheduler = client.get)
 
 Machine Learning 
 ================
