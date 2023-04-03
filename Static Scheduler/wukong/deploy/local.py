@@ -167,7 +167,7 @@ class LocalCluster(SpecCluster):
         max_task_fanout = 10,
         chunk_large_tasks = False,
         wukong_config_path = "./wukong-config.yaml",
-        big_task_threshold = 50,
+        big_task_threshold = 200_000_000,
         print_debug = False,
         reuse_existing_fargate_tasks_on_startup = True, # If there are already some Fargate tasks appropriately tagged/grouped and already running, should we just use those?
         executors_use_task_queue = True,                # Large tasks don't write data; instead, they wait for the tasks to become ready to execute locally.
