@@ -6,7 +6,7 @@ __pycache__/
 # C extensions
 *.so
 
-"Static Scheduler/WukongTestNotebook.ipynb"
+Static Scheduler/WukongTestNotebook.ipynb
 
 # Distribution / packaging
 .Python
