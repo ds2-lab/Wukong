@@ -9,7 +9,7 @@ import time
 
 # NOTES:
 # - These scripts use the `wukong-config.yaml` file located in "/home/ec2-user/Wukong/Static Scheduler/wukong-config.yaml".
-#   Please modify the `wukong_config_path` key-word argument passed to the `LocalCluster` instance on line 23 if your
+#   Please modify the `wukong_config_path` key-word argument passed to the `LocalCluster` instance on line 32 if your
 #   configuration file is located somewhere else. 
 #
 # - Assuming you're just running this from the cloned repository without installing any Python modules...
@@ -41,7 +41,8 @@ def incr(x):
 inc = dask.delayed(incr)
 
 z = inc(3)
-res = z.compute(scheduler = client.get)
+result = z.compute(scheduler = client.get)
+print("Result: %d" % result) 
 
 lc.close()
 

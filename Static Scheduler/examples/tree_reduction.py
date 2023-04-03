@@ -7,9 +7,11 @@ import pprint
 import dask 
 import time 
 
+import operator
+
 # NOTES:
 # - These scripts use the `wukong-config.yaml` file located in "/home/ec2-user/Wukong/Static Scheduler/wukong-config.yaml".
-#   Please modify the `wukong_config_path` key-word argument passed to the `LocalCluster` instance on line 32 if your
+#   Please modify the `wukong_config_path` key-word argument passed to the `LocalCluster` instance on line 34 if your
 #   configuration file is located somewhere else. 
 #
 # - Assuming you're just running this from the cloned repository without installing any Python modules...
@@ -35,24 +37,12 @@ lc = LocalCluster(
   use_fargate = False)
 client = Client(lc)
 
-# Define some functions.
+L = range(1024)
+while len(L) > 1:
+  L = list(map(delayed(operator.add), L[0::2], L[1::2]))
 
-def incr(x):
-  return x + 1
-
-def decr(x):
-  return x - 1
-
-def add_values(x, y):
-  return x + y 
-
-# 3-Node DAG with a Fan-In
-x = delayed(incr)(30)
-y = delayed(decr)(70)
-z = delayed(add_values)(x,y)
-
-result = z.compute(scheduler = client.get)
-print("Result: %d" % result)  
+result = L[0].compute(scheduler = client.get)
+print("Result: %d" % result) 
 
 lc.close()
 
