@@ -46,7 +46,7 @@ u, s, v = da.linalg.svd(X)
 
 # Start the computation.
 result = v.compute(scheduler = client.get)
-print("Result: %d" % result) 
+print("Result: %s" % result) 
 
 lc.close()
 

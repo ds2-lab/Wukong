@@ -46,7 +46,7 @@ u, s, v = da.linalg.svd_compressed(X, k=5)
 
 # Start the computation.
 result = v.compute(scheduler = client.get)
-print("Result: %d" % result) 
+print("Result: %s" % result) 
 
 lc.close()
 
