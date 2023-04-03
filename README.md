@@ -162,7 +162,7 @@ a = delayed(incr)(5)
 b = delayed(decr)(a)
 c = delayed(double)(b)
 
-result1 = c.compute()
+result1 = c.compute(scheduler = client.get)
 print("Result: %d" % result1)  
 
 # 3-Node DAG with a Fan-In
@@ -196,7 +196,7 @@ while len(L) > 1:
   L = list(map(delayed(operator.add), L[0::2], L[1::2]))
 
 # Start the computation.
-L[0].compute()
+L[0].compute(scheduler = client.get)
 ```
 
 ### SVD of 'Tall-and-Skinny' Matrix 
