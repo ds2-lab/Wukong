@@ -334,13 +334,13 @@ def lambda_handler(event, context):
 
             # Extend the loop since we successfully were reused.
             finish = time.time() + try_interval
-            logger.debug("[INFO] Updated message-loop stop time is {}. Current time: {}".format(finish, time.time()))
+            logger.debug("Updated message-loop stop time is {}. Current time: {}".format(finish, time.time()))
             reused = True 
 
             returned_counter_value = res["counter-value"]
 
             if counter_value != returned_counter_value:
-               logger.debug("[ERROR] Leaf counter for task {} returned a different iteration counter value after reuse. Old value: {}. New value: {}.".format(leaf_key, counter_value, new_val))
+               logger.error("Leaf counter for task {} returned a different iteration counter value after reuse. Old value: {}. New value: {}.".format(leaf_key, counter_value, new_val))
 
             # Increment this AFTER we are done executing, since otherwise all the time we spent executing will be counted, which is pointless.
             last_message_time = time.time() 
@@ -350,11 +350,11 @@ def lambda_handler(event, context):
             lambda_execution_breakdown.total_duration = time.time() - lambda_function_start_time
             lambda_execution_breakdown.reuse_count += 1            
          elif new_val < counter_value:
-            logger.debug("[ERROR] Iteration counter for task {} got SMALLER. Old value: {}. New value: {}.".format(leaf_key, counter_value, new_val))
+            logger.error("Iteration counter for task {} got SMALLER. Old value: {}. New value: {}.".format(leaf_key, counter_value, new_val))
             # If we've been waiting for a while, print something about how long we've been waiting.
             time_since_message = time.time() - last_message_time
             if time_since_message > notify_long_wait:
-               logger.debug("[WARNING] Leaf Lambda for task {} has been waiting {} seconds for a message...".format(leaf_key, time_since_message))
+               logger.warning("[WARNING] Leaf Lambda for task {} has been waiting {} seconds for a message...".format(leaf_key, time_since_message))
                notify_long_wait += notify_inc # Notify again in another 'notify_inc' seconds.
             
             # Exponential backoff.
@@ -695,7 +695,7 @@ def publish_dcp_message(channel, payload, serialized = True, max_tries = 8, base
          success = True
          break
       except (ConnectionError, Exception) as ex:
-         logger.debug("[ERROR] {} when attempting to publish a message to channel {} on EC2-Redis.".format(type(ex), channel))
+         logger.error("{} when attempting to publish a message to channel {} on EC2-Redis.".format(type(ex), channel))
          sleep_interval = ((2 ** num_tries) * base_sleep) + (random.randint(0, 1000) / 1000)
          if sleep_interval > max_sleep:
             sleep_interval = max_sleep + (random.randint(0, 500) / 1000)
@@ -930,9 +930,9 @@ def get_data_from_redis(task_to_fargate_mapping,
                break 
             else:
                if use_fargate:
-                  logger.debug("[ERROR] Retrieved 'None' after reading value at key {} [sid-{}] from Redis at {}:6379 ({}). Will try one more time before checking EC2-Redis...".format(redis_key, current_scheduler_id, fargate_ip, fargate_arn))
+                  logger.error("Retrieved 'None' after reading value at key {} [sid-{}] from Redis at {}:6379 ({}). Will try one more time before checking EC2-Redis...".format(redis_key, current_scheduler_id, fargate_ip, fargate_arn))
                else: 
-                  logger.debug("[ERROR] Retrieved 'None' after reading value at key {} [sid-{}] from DCP Redis.".format(redis_key, current_scheduler_id))
+                  logger.error("Retrieved 'None' after reading value at key {} [sid-{}] from DCP Redis.".format(redis_key, current_scheduler_id))
                # We flip the 'quit_on_none' to True so if we get None again, we'll just exit and try reading from EC2-Redis.
                quit_on_none = True
 
@@ -948,9 +948,9 @@ def get_data_from_redis(task_to_fargate_mapping,
             break 
       except Exception as ex:
          if use_fargate:
-            logger.debug("[ERROR] Exception while attempting to read data at key {} [sid-{}] from Redis at {}:6379 ({}) (Try {}/{}).".format(redis_key, current_scheduler_id, fargate_ip, fargate_arn, num_tries, max_tries))
+            logger.error("Exception while attempting to read data at key {} [sid-{}] from Redis at {}:6379 ({}) (Try {}/{}).".format(redis_key, current_scheduler_id, fargate_ip, fargate_arn, num_tries, max_tries))
          else:
-            logger.debug("[ERROR] Exception while attempting to read data at key {} [sid-{}] from DCP-Redis (Try {}/{}).".format(redis_key, current_scheduler_id, num_tries, max_tries))
+            logger.error("Exception while attempting to read data at key {} [sid-{}] from DCP-Redis (Try {}/{}).".format(redis_key, current_scheduler_id, num_tries, max_tries))
          logger.debug("\tException: [{}] {}".format(type(ex), ex.__str__()))
          sleep_amount = ((2 ** num_tries) * sleep_base) + (random.randint(0, 1000) / 1000)
          sleep_amount = min(sleep_amount, sleep_max) + (random.randint(0, 5000) / 1000) # Clamp the sleep value to prevent super long sleeps, then add a random amount between 1 and 5 seconds.
@@ -985,11 +985,11 @@ def get_data_from_redis(task_to_fargate_mapping,
                read_stop = time.time()
                break 
             except Exception as ex:
-               logger.debug("[ERROR] Exception while attempting to read data at key {} [sid-{}] from Redis EC2-Redis (dcp-redis) (Try {}/{}).".format(redis_key, current_scheduler_id, num_tries, max_tries))
-               logger.debug("\tException: [{}] {}".format(type(ex), ex.__str__()))
+               logger.error("Exception while attempting to read data at key {} [sid-{}] from Redis EC2-Redis (dcp-redis) (Try {}/{}).".format(redis_key, current_scheduler_id, num_tries, max_tries))
+               logger.error("\tException: [{}] {}".format(type(ex), ex.__str__()))
                sleep_amount = ((2 ** num_tries) * sleep_base) + (random.randint(0, 1000) / 1000)
                sleep_amount = min(sleep_amount, sleep_max) + (random.randint(0, 5000) / 1000) # Clamp the sleep value to prevent super long sleeps, then add a random amount between 1 and 5 seconds.
-               logger.debug("\t\tSleeping for {} seconds before trying again...".format(sleep_amount))
+               logger.error("\t\tSleeping for {} seconds before trying again...".format(sleep_amount))
                time.sleep(sleep_amount)
                num_tries = num_tries + 1
 
@@ -1124,10 +1124,10 @@ def store_value_in_redis(path_node,
       # Store the data and return True.
       redis_client.set(redis_key, value)            
    except Exception as ex1:
-      logger.debug("[ERROR] Exception encountered whilst storing value ({} bytes) for task {} at key {}.\nException: [{}] {}".format(write_size, task_key, redis_key, type(ex1), ex1.__str__()))
+      logger.error("Exception encountered whilst storing value ({} bytes) for task {} at key {}.\nException: [{}] {}".format(write_size, task_key, redis_key, type(ex1), ex1.__str__()))
       if use_fargate:
-         logger.debug("\tRedis instance at {}:6379 -- ARN: {}".format(fargate_ip, fargate_arn))
-         logger.debug("\tWill try to disable readonly mode and try again...\n")
+         logger.error("\tRedis instance at {}:6379 -- ARN: {}".format(fargate_ip, fargate_arn))
+         logger.error("\tWill try to disable readonly mode and try again...\n")
          
          time.sleep(0.5 + (random.randint(0, 1000) / 1000)) # Delay things to give Redis a break...
 
@@ -1138,8 +1138,8 @@ def store_value_in_redis(path_node,
             redis_client.slaveof() # Call with no arguments to promote instance to a Master
             slave_of_succeeded = True 
          except Exception as ex1:
-            logger.debug("\t[ERROR] Exception encountered whilst calling slaveof() on Redis @ {}:6379 ({}).".format(fargate_ip, fargate_arn))
-            logger.debug("\tSkipping that call for now...")
+            logger.error("\tException encountered whilst calling slaveof() on Redis @ {}:6379 ({}).".format(fargate_ip, fargate_arn))
+            logger.error("\tSkipping that call for now...")
             time.sleep(0.5 + (random.randint(0, 1000) / 1000)) # Delay things to give Redis a break...
 
          logger.debug("\tslave_of_succeeded: {}".format(slave_of_succeeded))
@@ -1156,13 +1156,13 @@ def store_value_in_redis(path_node,
             redis_client.set(redis_key, value)
             break
          except Exception as ex2:
-            logger.debug("[ERROR] Another exception encountered whilst storing value ({} bytes) for task {} at key {}. (Try {} of {}.)".format(write_size, task_key, redis_key, num_tries, max_tries))
+            logger.error("Another exception encountered whilst storing value ({} bytes) for task {} at key {}. (Try {} of {}.)".format(write_size, task_key, redis_key, num_tries, max_tries))
             if use_fargate:
-               logger.debug("\tRedis instance at {}:6379 -- ARN: {}".format(fargate_ip, fargate_arn))
-            logger.debug("\tException: [{}] {}".format(type(ex2), ex2.__str__()))
+               logger.error("\tRedis instance at {}:6379 -- ARN: {}".format(fargate_ip, fargate_arn))
+            logger.error("\tException: [{}] {}".format(type(ex2), ex2.__str__()))
             sleep_amount = ((2 ** num_tries) * sleep_base) + (random.randint(0, 1000) / 1000)
             sleep_amount = min(sleep_amount, sleep_max) + (random.randint(0, 5000) / 1000) # Clamp the sleep value to prevent super long sleeps, then add a random amount between 1 and 5 seconds.
-            logger.debug("\t\tSleeping for {} seconds before trying again (assuming we aren't about to give up)...".format(sleep_amount))
+            logger.error("\t\tSleeping for {} seconds before trying again (assuming we aren't about to give up)...".format(sleep_amount))
             time.sleep(sleep_amount) # Exponential backoff. 
             num_tries = num_tries + 1
 
@@ -1312,10 +1312,10 @@ def check_dependency_counter_bits(dependent_path_node, num_dependencies, increme
             break                                                                                                               
          except (ConnectionError, Exception) as ex:
             # Exponential backoff.
-            logger.debug("[ERROR] {} when attempting to get and update bit dependency counter associated with key {}.".format(type(ex), key_counter))
+            logger.error("{} when attempting to get and update bit dependency counter associated with key {}.".format(type(ex), key_counter))
             sleep_interval = ((2 ** num_tries) * sleep_base) + (random.randint(0, 500) / 1000)
             sleep_amount = min(max_sleep, sleep_interval) + (random.randint(0, 500) / 1000) # Clamp to 'sleep_cap' then add some random value.
-            logger.debug("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
+            logger.error("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
             num_tries += 1
             time.sleep(sleep_amount)
 
@@ -1421,10 +1421,10 @@ def check_dependency_counter_bits(dependent_path_node, num_dependencies, increme
             break                                                                                                               
          except (ConnectionError, Exception) as ex:
             # Exponential backoff.
-            logger.debug("[ERROR] {} when attempting to get and update bit dependency counter associated with key {}.".format(type(ex), key_counter))
+            logger.error("{} when attempting to get and update bit dependency counter associated with key {}.".format(type(ex), key_counter))
             sleep_interval = ((2 ** num_tries) * sleep_base) + (random.randint(0, 500) / 1000)
             sleep_amount = min(max_sleep, sleep_interval) + (random.randint(0, 500) / 1000) # Clamp to 'sleep_cap' then add some random value.
-            logger.debug("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
+            logger.error("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
             num_tries += 1
             time.sleep(sleep_amount)
 
@@ -1593,10 +1593,10 @@ def check_dependency_counter(path_node, num_dependencies, increment = False, tas
             break                                                                                                            
          except (ConnectionError, Exception) as ex:
             # Exponential backoff.
-            logger.debug("[ERROR] {} when attempting to increment standard dependency counter associated with key {}.".format(type(ex), key_counter))
+            logger.error("{} when attempting to increment standard dependency counter associated with key {}.".format(type(ex), key_counter))
             sleep_interval = ((2 ** num_tries) * sleep_base) + (random.randint(0, 500) / 1000)
             sleep_amount = min(max_sleep, sleep_interval) + (random.randint(0, 500) / 1000) # Clamp to 'sleep_cap' then add some random value.
-            logger.debug("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
+            logger.error("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
             num_tries += 1
             time.sleep(sleep_amount)
 
@@ -1641,7 +1641,7 @@ def check_dependency_counter(path_node, num_dependencies, increment = False, tas
             success = True 
             break
          except AttributeError:
-            logger.debug("[ERROR] AttributeError: 'NoneType' object has no attribute 'decode'."
+            logger.error("AttributeError: 'NoneType' object has no attribute 'decode'."
                      + " Occurred while retrieving dependency counter for Task {} [sid-{} uid-{}] (key counter = {})".format(task_key, 
                                                                                                                            path_node.scheduler_id, 
                                                                                                                            path_node.update_graph_id, 
@@ -1649,7 +1649,7 @@ def check_dependency_counter(path_node, num_dependencies, increment = False, tas
             return False                                                                                                                 
          except (ConnectionError, Exception) as ex:
             # Exponential backoff.
-            logger.debug("[ERROR] {} when attempting to get standard dependency counter associated with key {}.".format(type(ex), key_counter))
+            logger.error("{} when attempting to get standard dependency counter associated with key {}.".format(type(ex), key_counter))
             sleep_interval = ((2 ** num_tries) * sleep_base) + (random.randint(0, 500) / 1000)
             sleep_amount = min(max_sleep, sleep_interval) + (random.randint(0, 500) / 1000) # Clamp to 'sleep_cap' then add some random value.
             logger.debug("\tSleeping for {} seconds before trying again, assuming we aren't out of tries... (try {}/{})".format(sleep_amount, num_tries, max_tries))
@@ -1808,9 +1808,9 @@ def process_path(nodes_map_serialized,
          # Check the result of executing the task.
          # If the task erred, just return... 
          if result[OP_KEY] == TASK_ERRED_KEY:
-            logger.debug("[ERROR] Execution of task {} resulted in an error.".format(task_key))
-            logger.debug("Result: " + str(result))
-            logger.debug("Result['exception']: " + str(result["exception"]))
+            logger.error("Execution of task {} resulted in an error.".format(task_key))
+            logger.error("Result: " + str(result))
+            logger.error("Result['exception']: " + str(result["exception"]))
             return {
                'statusCode': 400,
                'body': ujson.dumps(result["exception"])
@@ -2061,7 +2061,7 @@ def process_path(nodes_map_serialized,
                   dcp_redis.set(task_key, serialized_value)
                   success = True
                except Exception as ex:
-                  logger.debug("[ERROR] Connection to DCP Redis timed out while calling set() for task {}. (try {}/{}).".format(
+                  logger.error("Connection to DCP Redis timed out while calling set() for task {}. (try {}/{}).".format(
                      task_key, num_tries, max_tries))
                   num_tries += 1
                   sleep_amount = ((2 ** num_tries) * sleep_base) 
@@ -2069,10 +2069,10 @@ def process_path(nodes_map_serialized,
                   sleep_amount += random.randint(0, int(sleep_amount)) # Add a random amount.
 
                   if (num_tries > max_tries):
-                     logger.debug("OUT OF TRIES For storing task {} data in DCP Redis...".format(task_key))
+                     logger.error("OUT OF TRIES For storing task {} data in DCP Redis...".format(task_key))
                      raise ex
                   else:
-                     logger.debug("\t\tSleeping for {} seconds before trying again...".format(sleep_amount))
+                     logger.warning("\t\tSleeping for {} seconds before trying again...".format(sleep_amount))
                      time.sleep(sleep_amount)                     
 
             # Collect, calculate, and store diagnostic/metric/debug information.
@@ -2229,7 +2229,7 @@ def process_out_edges(out_edges,
       previous_results[current_task_key] = value
    
    if value is None:
-      raise ValueError("[ERROR] Previous result value is none for task {} [sid-{} uid-{}]".format(current_task_key, current_path_node.scheduler_id, current_path_node.update_graph_id))
+      raise ValueError("Previous result value is none for task {} [sid-{} uid-{}]".format(current_task_key, current_path_node.scheduler_id, current_path_node.update_graph_id))
 
    # Will be set to True or False if necessary, otherwise this will just be ignored.
    need_to_download_become_path = False # Default value; doesn't mean anything really.
@@ -3319,7 +3319,7 @@ def process_task(task_definition,
       # TO-DO: Handle missing dependencies?
       # Make multiple attempts to retrieve missing dependency from Redis in case we've been timing out.
       if serialized_dependency_data is None:
-         logger.debug("[ {} ] [ERROR] Dependency {} is None... Failed to retrieve dependency {} from Redis. Exiting.".format(datetime.datetime.utcnow(), dependency_task_key, dependency_task_key))
+         logger.error("Dependency {} is None... Failed to retrieve dependency {} from Redis. Exiting.".format(dependency_task_key, dependency_task_key))
          return {
             OP_KEY: TASK_ERRED_KEY,   
             "statusCode": 400,
