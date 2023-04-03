@@ -35,7 +35,7 @@ Step 2 - Create an AWS Lambda Function
 
 Next, we need to create an AWS Lambda function. This can be done in several ways. In this case, we will be using the AWS Lambda web console. Navigate to the AWS Lambda console and click the "Create function" button (pictured below).
 
-.. image:: /images/lambda_console_create.png
+.. image:: https://raw.githubusercontent.com/ds2-lab/Wukong/socc2020/docs/images/lambda_console_create.png
    :width: 600
 
 You will be shown a creation screen through which you may specify various information about the function. 
@@ -44,7 +44,7 @@ For the name, you should use ``WukongExecutor``. If you use a different name, th
 
 For the Runtime, select ``Python 3.8``. 
 
-.. image:: /images/lambda_basic_info.png
+.. image:: https://raw.githubusercontent.com/ds2-lab/Wukong/socc2020/docs/images/lambda_basic_info.png
    :width: 600
 
 Create an IAM Role
@@ -52,7 +52,7 @@ Create an IAM Role
 
 Under Permissions, select ``Change default execution role``. Some additional options will be displayed. Click the hyperlink "IAM Console"; this should open the IAM role creation page in a new browser tab.
 
-.. image:: /images/iam_role_create.png
+.. image:: https://raw.githubusercontent.com/ds2-lab/Wukong/socc2020/docs/images/iam_role_create.png
    :width: 600
 
 From here, you should select the following three polices:
@@ -76,13 +76,13 @@ Next, you will need to add four layers to the function. AWS Lambda Layers are ba
 Scroll down to the "Layers" section and click the "Add a layer" button. Select "Specify an ARN". Below is a list of layer ARN's. You should repeat these steps, specifying each of the ARN's found in the list.
 
     1. ``arn:aws:lambda:us-east-1:668099181075:layer:AWSLambda-Python37-SciPy1x:2``
-    2. ``arn:aws:lambda:us-east-1:561589293384:layer:DaskDependenciesAndXRay:9``
+    2. ``arn:aws:lambda:us-east-1:205616672683:layer:DaskDependencies:1``
     3. ``arn:aws:lambda:us-east-1:561589293384:layer:DaskLayer2:2``
     4. ``arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9``
 
 The first layer contains ``Numpy`` and ``Scipy``, two Python modules required by the Wukong Executor. The next layer contains the Python dependencies of Dask along with the AWS X-Ray API, which is used for debugging and metadata. The third layer contains ``Dask`` itself, and the last layer contains ``Dask-ML`` and its dependencies.
 
-.. image:: /images/lambda_add_layer.png
+.. image:: https://raw.githubusercontent.com/ds2-lab/Wukong/socc2020/docs/images/lambda_add_layer.png
    :width: 600
 
 General Configuration
@@ -90,7 +90,7 @@ General Configuration
 
 Once you have added the Lambda Layers to the function, you should modify the "General configuration" of the function. This includes the function's memory (RAM) and Timeout (i.e., how long the function can execute for). To change these values, select the "Configuration" tab. Then select "General configuration" from the list of buttons on the left. Finally, click the "Edit" button.
 
-.. image:: /images/lambda_configure.png
+.. image:: https://raw.githubusercontent.com/ds2-lab/Wukong/socc2020/docs/images/lambda_configure.png
    :width: 600
 
 You will be presented with a "Basic settings" menu through which you may modify the amount of RAM that gets allocated to the function as well as the function's timeout. 
