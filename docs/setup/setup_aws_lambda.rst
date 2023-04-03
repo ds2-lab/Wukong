@@ -76,7 +76,7 @@ Next, you will need to add four layers to the function. AWS Lambda Layers are ba
 Scroll down to the "Layers" section and click the "Add a layer" button. Select "Specify an ARN". Below is a list of layer ARN's. You should repeat these steps, specifying each of the ARN's found in the list.
 
     1. ``arn:aws:lambda:us-east-1:668099181075:layer:AWSLambda-Python37-SciPy1x:2``
-    2. ``arn:aws:lambda:us-east-1:561589293384:layer:DaskDependenciesAndXRay:9``
+    2. ``arn:aws:lambda:us-east-1:205616672683:layer:DaskDependencies:1``
     3. ``arn:aws:lambda:us-east-1:561589293384:layer:DaskLayer2:2``
     4. ``arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9``
 

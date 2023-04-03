@@ -444,7 +444,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
             # This contains Dask itself.
             "arn:aws:lambda:us-east-1:561589293384:layer:DaskLayer2:2",
             # This contains Dask's dependencies as well as the AWS X-Ray module/library.
-            "arn:aws:lambda:us-east-1:561589293384:layer:DaskDependenciesAndXRay:9",
+            "arn:aws:lambda:us-east-1:205616672683:layer:DaskDependencies:1",
             # This contains DaskML and its dependencies.
             "arn:aws:lambda:us-east-1:561589293384:layer:dask-ml-layer:9"
         ]
