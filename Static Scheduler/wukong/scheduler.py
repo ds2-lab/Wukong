@@ -102,6 +102,16 @@ from .stealing import WorkStealing
 from .variable import VariableExtension
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+logFormatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setLevel(logging.DEBUG)
+consoleHandler.setFormatter(logFormatter)
+
+# Add console handler to logger
+logger.addHandler(consoleHandler)
 
 ENCODING = 'utf-8' 
 
@@ -1564,8 +1574,8 @@ class Scheduler(ServerNode):
         self.batched_lambda_invoker.start(self.lambda_client, scheduler_address = self.address)        
         # Write the address to Elasticache so the Lambda function can access it without being told explicitly.
         address_key = "scheduler-address"
-        logger.info("Writing value %s to key %s in Redis" % (self.address , address_key))
-        print("Writing value {} to key {} in Redis...".format(self.address, address_key))
+        # logger.info("Writing value %s to key %s in Redis" % (self.address , address_key))
+        # print("Writing value {} to key {} in Redis...".format(self.address, address_key))
         self.dcp_redis.set(address_key, self.address)          
         print("Done.")
 
@@ -1777,17 +1787,15 @@ class Scheduler(ServerNode):
         keys = set(keys)
         update_graph_id = str(random.randint(0, 9999)) + random.choice(string.ascii_letters).upper() + random.choice(string.ascii_letters).upper()
         self.number_update_graph_calls += 1
-        print("\n=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=")
-        print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= [SCHEDULER] update_graph() #{} --- ID: {} (Scheduler ID is {}) =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=".format(self.number_update_graph_calls, update_graph_id, self.scheduler_id))
-        print("=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=\n")
-
+        logger.debug("=-=-=-= [SCHEDULER] update_graph() #{} --- ID: {} (Scheduler ID is {}) =-=-=-=".format(self.number_update_graph_calls, update_graph_id, self.scheduler_id))
+        
         if self.print_debug and persist:
-            print("=== This is a persist operation! ===")
+            logger.debug("=== This is a persist operation! ===")
 
         if self.debug_mode:
-            print("\tlen(tasks) = {}, len(keys) = {}".format(len(tasks), len(keys)))
+            logger.debug("\tlen(tasks) = {}, len(keys) = {}".format(len(tasks), len(keys)))
             self.num_tasks_processed += len(tasks)
-            print("\tNumber of tasks processed: {}\n".format(self.num_tasks_processed))
+            logger.debug("\tNumber of tasks processed: {}\n".format(self.num_tasks_processed))
 
         if len(tasks) > 1:
             self.log_event(
@@ -1817,10 +1825,9 @@ class Scheduler(ServerNode):
                 del tasks[k]
 
         if self.print_debug and self.print_level <= 1:
-            print("\nNew Tasks: ")
+            logger.debug("New Tasks: ")
             for key in list(tasks):
-                print(key)
-            print("\n\n")
+                logger.debug(key)
 
         dependencies = dependencies or {}
 
@@ -1951,20 +1958,20 @@ class Scheduler(ServerNode):
 
         if self.debug_mode:
             executing_again = []
-            print("\n\n-=-=-=-=-=-=- Runnables (len = {}) -=-=-=-=-=-=-\n".format(len(runnables)))
+            logger.debug("-=-=-=-=-=-=- Runnables (len = {}) -=-=-=-=-=-=-".format(len(runnables)))
             for ts in runnables:
-                print("{} -- {}".format(ts.key, ts.state))
+                logger.debug("{} -- {}".format(ts.key, ts.state))
                 if ts.key in self.completed_tasks:
                     executing_again.append(ts)
                 if ts.priority is None and ts.run_spec:
                     ts.priority = (self.generation, 0)
-            print("\n-=-=-=-=-=-=- End of Runnables -=-=-=-=-=-=-\n\n")
+            logger.debug("-=-=-=-=-=-=- End of Runnables -=-=-=-=-=-=-")
             
-            print("\n\n-=-=-=-=-=-=- Executing {} tasks again (not necessarily for the second time) -=-=-=-=-=-=-\n".format(len(executing_again)))
+            logger.debug("-=-=-=-=-=-=- Executing {} tasks again (not necessarily for the second time) -=-=-=-=-=-=-".format(len(executing_again)))
             for ts in executing_again:
                 num_executed_so_far = self.completed_task_counts[ts.key]
-                print("Potentially executing task {} for time #{}".format(ts.key, (num_executed_so_far+1)))
-            print("\n-=-=-=-=-=-=- End of executing again -=-=-=-=-=-=-\n\n")
+                logger.debug("Potentially executing task {} for time #{}".format(ts.key, (num_executed_so_far+1)))
+            logger.debug("-=-=-=-=-=-=- End of executing again -=-=-=-=-=-=-")
 
         # runnables_dict  = {ts.key:ts for ts in runnables} # Used when populating mapping for dependencies --> bit position
         for ts in runnables:
@@ -2020,11 +2027,11 @@ class Scheduler(ServerNode):
                 logger.exception(e)
         
         if self.debug_mode:
-            print("\n\n-=-=-=-=-=-=- Tasks executed since last call to update_graph ({} tasks were executed) -=-=-=-=-=-=-\n".format(len(self.executed_tasks)))
+            logger.debug("\n\n-=-=-=-=-=-=- Tasks executed since last call to update_graph ({} tasks were executed) -=-=-=-=-=-=-\n".format(len(self.executed_tasks)))
             self.executed_tasks.sort()
             for task_key in self.executed_tasks:
                 print(task_key)
-            print("\n-=-=-=-=-=-=- End of tasks executed since last call to update_graph -=-=-=-=-=-=-\n\n")
+            logger.debug("\n-=-=-=-=-=-=- End of tasks executed since last call to update_graph -=-=-=-=-=-=-\n\n")
 
             self.executed_tasks_old[self.number_update_graph_calls] = self.executed_tasks.copy()
             self.executed_tasks = []
@@ -2085,7 +2092,7 @@ class Scheduler(ServerNode):
         #    print(tsk)
         
         if self.print_debug or self.debug_mode:
-            print("len(tasks): {}\nlen(runnables): {}\nlen(touched_tasks): {}\nlen(self.tasks): {}".format(len(tasks), len(runnables), len(touched_tasks), len(self.tasks)))
+            logger.debug("len(tasks): {}\nlen(runnables): {}\nlen(touched_tasks): {}\nlen(self.tasks): {}".format(len(tasks), len(runnables), len(touched_tasks), len(self.tasks)))
 
         # Collect all leaf tasks.
         #for task_key, ts in self.tasks.items():
@@ -2102,7 +2109,7 @@ class Scheduler(ServerNode):
             #             # Next, it should either have no dependencies...
                 if len(ts.dependencies) == 0:
                     if self.print_debug and self.print_level <= 3:
-                        print("\tAdding task {} to leaf tasks. Task state: {}\n".format(task_key, ts.state))
+                        logger.debug("\tAdding task {} to leaf tasks. Task state: {}\n".format(task_key, ts.state))
                     leaf_tasks[task_key] = ts
                 else:
                     # It is possible that we'll have a task dependent only on tasks that have already been executed. In that case, we can invoke 
@@ -2115,39 +2122,39 @@ class Scheduler(ServerNode):
                     # Basically, we check and see if all the dependencies are ones that we have already. If not, then we won't be invoking the task with the leaf wave.
                     for dep in deps:
                         if self.print_debug and self.print_level <= 1:
-                            print("\tProcessing dep of {}: {}".format(task_key, dep.key))
+                            logger.debug("\tProcessing dep of {}: {}".format(task_key, dep.key))
                         #if self.completed_tasks[dep.key] == False:
                         if dep.key not in self.tasks or dep.state != "memory":
                             if self.print_debug and self.print_level <= 1:
-                                print("\t\tDependency {} of task {} has not been completed yet...\n".format(dep.key, task_key))
+                                logger.debug("\t\tDependency {} of task {} has not been completed yet...\n".format(dep.key, task_key))
                             add_to_leaf_tasks = False 
                             break 
                     
                     if add_to_leaf_tasks:
                         if self.print_debug and self.print_level <= 3:
-                            print("\tAdding task {} to leaf tasks. NOTE: It actually has {} dependencies, but we have their data already.\n".format(task_key, len(list(ts.dependencies))))
+                            logger.debug("\tAdding task {} to leaf tasks. NOTE: It actually has {} dependencies, but we have their data already.\n".format(task_key, len(list(ts.dependencies))))
                         leaf_tasks[task_key] = ts
                     #else:
                     #    if self.print_debug:
                     #        print("\t[WARNING] Task {} has already been completed...?".format(task_key))
 
         if self.debug_mode or (self.print_debug and self.print_level <= 2):
-            print("num_leaf_tasks =", len(leaf_tasks))
+            logger.debug("num_leaf_tasks =", len(leaf_tasks))
             if len(leaf_tasks) == 0 and not self.debug_mode:
                 for ts in runnables:
-                    print("{} -- State: {}\nDependencies:".format(ts.key, ts.state))
+                    logger.debug("{} -- State: {}\nDependencies:".format(ts.key, ts.state))
                     for dep in list(ts.dependencies):
-                        print("\t{} -- State: {}".format(dep.key, dep.state))
-                        print("\tPreviously a Leaf Task: {}\n".format(self.seen_leaf_tasks.get(dep.key, False)))
+                        logger.debug("\t{} -- State: {}".format(dep.key, dep.state))
+                        logger.debug("\tPreviously a Leaf Task: {}\n".format(self.seen_leaf_tasks.get(dep.key, False)))
         
         sum_tasks = 0
         for k,c in self.completed_task_counts.items():
             sum_tasks = sum_tasks + c
         
         if self.debug_mode or (self.print_debug and self.print_level <= 2):
-            print("num_leaf_tasks =", len(leaf_tasks))        
-            print("Number of tasks executed so far:", sum_tasks)
-            print("[SCHEDULER] update-graph() done.")
+            logger.debug("num_leaf_tasks =", len(leaf_tasks))        
+            logger.debug("Number of tasks executed so far:", sum_tasks)
+            logger.debug("update-graph() done.")
             if self.debug_mode:
                 input("\n-=-=-=-=-=-=- Type something and then enter to continue... -=-=-=-=-=-=-\n\n")
 
@@ -2283,7 +2290,7 @@ class Scheduler(ServerNode):
             task_sizes.append(current_payload_size)
 
             if self.print_debug and self.print_level <= 1:
-                print("Size of serialized task payload for task {}: {} bytes".format(current_task.key, current_payload_size))
+                logger.debug("Size of serialized task payload for task {}: {} bytes".format(current_task.key, current_payload_size))
             
             fargate_task_for_node = None
 
@@ -2295,7 +2302,7 @@ class Scheduler(ServerNode):
                     fargate_task_for_node = random.choice(self.workload_fargate_tasks['current'])
                 else:
                     if self.print_debug and self.print_level <= 1:
-                        print("\n\tReusing existing Fargate mapping for task {}".format(current_task.key))
+                        logger.debug("\tReusing existing Fargate mapping for task {}".format(current_task.key))
                     # Re-use previous mapping.
                     fargate_task_for_node = self.tasks_to_fargate_nodes[current_task.key]
             
@@ -2348,7 +2355,7 @@ class Scheduler(ServerNode):
             # If this is a brand new path, then the current node is the first of the path so add it to the dictionary.
             if isNewPath:
                 if self.print_debug and self.print_level <= 1:
-                    print("[NEW PATH] Task {} is the first node in a new path.".format(current_task.key))
+                    logger.debug("[NEW PATH] Task {} is the first node in a new path.".format(current_task.key))
                 tasks_to_path_starts[current_task.key] = current_path
 
             # Add the new path node to the current path. We should do this AFTER the previous step (where we
@@ -2365,7 +2372,7 @@ class Scheduler(ServerNode):
                 # Just doing it for consistency's sake.
                 redis_dep_counter_key = str(current_task.key) + DEPENDENCY_COUNTER_SUFFIX
                 if self.print_debug and self.print_level <= 1:
-                    print("Will be storing dependency counter for task {} at key {}".format(current_task.key, redis_dep_counter_key))
+                    logger.debug("Will be storing dependency counter for task {} at key {}".format(current_task.key, redis_dep_counter_key))
                 
                 initial_dep_value = 0
 
@@ -2377,19 +2384,19 @@ class Scheduler(ServerNode):
                         if self.print_debug and self.use_fargate:
                             # Make sure we include the task-to-fargate mapping for the dependency so the current task can find it.
                             current_path.tasks_to_fargate_nodes[dts.key] = self.tasks_to_fargate_nodes[dts.key]
-                            print("Dependency {} of task {} is in memory!".format(dts.key, current_task.key))
-                            print("\tIncrementing initial dependency counter value for task {}. (Was {}, is now {}.)".format(
+                            logger.debug("Dependency {} of task {} is in memory!".format(dts.key, current_task.key))
+                            logger.debug("\tIncrementing initial dependency counter value for task {}. (Was {}, is now {}.)".format(
                                 current_task.key, (initial_dep_value - 1), initial_dep_value))
                     else:
                         if self.print_debug:
-                            print("Dependency {} of task {} is in state {}. Cannot consider it done.".format(dts.key, current_task.key, self.tasks[dts.key].state))
+                            logger.debug("Dependency {} of task {} is in state {}. Cannot consider it done.".format(dts.key, current_task.key, self.tasks[dts.key].state))
 
                 initial_payloads[self.dcp_redis][redis_dep_counter_key] = initial_dep_value
 
             # If there are no downstream tasks from this node, then just pass.
             if payload["num-dependencies-of-dependents"] == 0:
                 if self.print_debug and self.print_level <= 1:
-                    print("[DEPENDENTS] Task {} has no dependents. Path ended.".format(current_task.key))
+                    logger.debug("[DEPENDENTS] Task {} has no dependents. Path ended.".format(current_task.key))
                 pass
             else:
                 dependents = list(current_task.dependents)
@@ -2401,13 +2408,13 @@ class Scheduler(ServerNode):
                 # on the same path. Additional outgoing edges will require their own paths.
                 # next_unvisited_node_should_go_on_new_path = False
                 if self.print_debug and self.print_level <= 1:
-                    print("[DEPENDENTS] Task {} has {} dependents.".format(current_task.key, len(dependents)))
+                    logger.debug("[DEPENDENTS] Task {} has {} dependents.".format(current_task.key, len(dependents)))
                 # Iterate over the remaining dependents.
                 for i in range(0, len(dependents)):
                     dependent_task_state = dependents[i]
                     key = dependent_task_state.key
                     if self.print_debug and self.print_level <= 1:
-                        print("\t[DEPENDENTS] Looking at dependent {}...".format(key))
+                        logger.debug("\t[DEPENDENTS] Looking at dependent {}...".format(key))
                     # Check if we've already visited the dependent node. If we have,
                     # then that means that at some point in a previous DFS, we touched this node.
                     if visited.get(key, False) == True:
@@ -2417,7 +2424,7 @@ class Scheduler(ServerNode):
                         # If the past is not none, then a path was already created at this node. Just use that path.
                         if existing_path is not None:
                             if self.print_debug and self.print_level <= 1:
-                                print("\t\t[PATH-V] Dependent task {} is already the start of an existing path.".format(key))
+                                logger.debug("\t\t[PATH-V] Dependent task {} is already the start of an existing path.".format(key))
                             
                             # Grab the start of the existing path (which should be the dependent task)
                             # and add that to the invoke list of the current path node. That's all we need to do.
@@ -2471,7 +2478,7 @@ class Scheduler(ServerNode):
                                     current_path.tasks_to_fargate_nodes[dependent_task_path_node.task_key] = dependent_task_path_node.fargate_node                                                          
                         else:
                             if self.print_debug and self.print_level <= 1:
-                                print("\t\t[PATH-V] Dependent task {} exists on some path. Using sub-path created from existing path.".format(key))
+                                logger.debug("\t\t[PATH-V] Dependent task {} exists on some path. Using sub-path created from existing path.".format(key))
                             # We're basically going to create a new path that starts at the dependent node
                             # using the dependent node's existing path. We're just going to discard everything
                             # that came before it.
@@ -2536,11 +2543,11 @@ class Scheduler(ServerNode):
                         if current_path_node.become is None:
                             dependent_task_path_node = DFS(dependent_task_state, current_path, current_path_size, visited, isNewPath = False, incrDepCounter = already_executed)
                             if self.print_debug and self.print_level <= 1:
-                                print("\t\t[PATH] Staying on same path for dependent task {}.\n\tTask {} will BECOME task {}.".format(key, current_path_node.get_task_key(), key))
+                                logger.debug("\t\t[PATH] Staying on same path for dependent task {}.\n\tTask {} will BECOME task {}.".format(key, current_path_node.get_task_key(), key))
                             current_path_node.become = dependent_task_path_node.task_key 
                         else:
                             if self.print_debug and self.print_level <= 1:
-                                print("\n\n\t\t[PATH] Creating new path for dependent task {}.\n\tTask {} will INVOKE task {}.".format(key, current_path_node.get_task_key(), key))
+                                logger.debug("\n\n\t\t[PATH] Creating new path for dependent task {}.\n\tTask {} will INVOKE task {}.".format(key, current_path_node.get_task_key(), key))
                             # Create a new path. We will invoke the dependent task and it will continue down this new path.
                             new_path = Path(None, None, None, None, None)
 
@@ -2575,9 +2582,9 @@ class Scheduler(ServerNode):
         
         # If we created a process to launch Fargate tasks, then we need to wait for it to finish before we begin invoking Lambdas.
         if self.use_fargate and fargate_launcher is not None:
-            print("[ {} ] Scheduler is waiting for FARGATE LAUNCHER progress to finish...".format(datetime.datetime.utcnow()))
+            logger.debug("Scheduler is waiting for FARGATE LAUNCHER progress to finish...")
             fargate_launcher.join()
-            print("[ {} ] Fargate-launching process has finished.".format(datetime.datetime.utcnow()))
+            logger.debug("Fargate-launching process has finished.")
             #print("fargate_tasks:", fargate_tasks)
             for fargate_task in fargate_tasks:
                 #print("Is fargate_task {} in self.workload_fargate_tasks['current']?".format(fargate_task))
@@ -2618,7 +2625,7 @@ class Scheduler(ServerNode):
             # Empty paths are only created during "fan-out" situations from a node. The tasks that get invoked
             # from the node with the fan-out are put on new paths.
             if self.print_debug and self.print_level <= 2:
-                print("[ {} ] - Performing DFS for leaf task {}.".format(datetime.datetime.utcnow(), leaf_task_key))
+                logger.debug("Performing DFS for leaf task {}.".format(leaf_task_key))
             DFS(leaf_task_state, new_path, current_path_size, visited, isNewPath = False, incrDepCounter = False)
         
         DFS_end = pythontime.time()
@@ -2631,23 +2638,23 @@ class Scheduler(ServerNode):
         if self.print_debug and self.print_level <= 1:
             counter = 0
             for path in paths:
-                print("\n\nPath #", counter)
+                logger.debug("Path #", counter)
                 for task in path.tasks:
                     # The task payload is mostly just serialized gibberish here.
                     task_str = task.to_string_no_task_payload()
                     if self.print_debug_max_chars > 0:
                         task_str = task_str[0:self.print_debug_max_chars] + "..."
-                    print(task_str)
+                    logger.debug(task_str)
                 if self.use_fargate:
-                    print("\nPath #{} Tasks-to-Fargate-Nodes Map:".format(counter))
+                    logger.debug("Path #{} Tasks-to-Fargate-Nodes Map:".format(counter))
                     for task_key, map in path.tasks_to_fargate_nodes.items():
-                        print("\t{} --> {}".format(task_key, str(map)))
+                        logger.debug("\t{} --> {}".format(task_key, str(map)))
                 counter = counter + 1
 
-        print("\n[ {} ] Number of Paths created: {}.".format(datetime.datetime.utcnow(), len(paths)))
+        logger.debug("Number of Paths created: {}.".format(len(paths)))
 
         if self.print_debug and self.print_level <= 3:
-            print("Serializing path starts...")
+            logger.debug("Serializing path starts...")
 
         _serialization_start = pythontime.time()
 
@@ -2699,10 +2706,10 @@ class Scheduler(ServerNode):
             #    print("Path beginning at task {} will be stored in Redis instance listening at {}:{}".format(task_key, host, port))
             path_key = task_key + PATH_KEY_SUFFIX
             if self.print_debug and self.print_level <= 1:
-                print("\nPath #{} - {}".format(path_counter, task_key))
-                print("\tLength of Path:", len(nodes), "tasks")
+                logger.debug("\nPath #{} - {}".format(path_counter, task_key))
+                logger.debug("\tLength of Path:", len(nodes), "tasks")
                 path_size = sys.getsizeof(serialized_payload)
-                print("\tSize of Path:", path_size, "bytes")
+                logger.debug("\tSize of Path:", path_size, "bytes")
                 path_sizes.append(path_size)
             #associated_redis_client = self.big_hash_ring.get_node_instance(task_key)
             initial_payloads[self.dcp_redis][path_key] = serialized_payload  
@@ -2713,11 +2720,11 @@ class Scheduler(ServerNode):
         
         metrics["Path-Serialization"] = _serialization_length
 
-        print("[ {} ] Done serializing all {} payloads. Took {} seconds. Storing paths in Redis now.".format(datetime.datetime.utcnow(), len(serialized_paths), _serialization_length))
+        logger.debug("Done serializing all {} payloads. Took {} seconds. Storing paths in Redis now.".format(len(serialized_paths), _serialization_length))
 
         if self.print_debug and self.print_level <= 3:
-            print("\nStoring dependency counters and paths now...")
-            print("Number of paths to store: ", len(tasks_to_path_starts))
+            logger.debug("\nStoring dependency counters and paths now...")
+            logger.debug("Number of paths to store: ", len(tasks_to_path_starts))
         
         _store_paths_redis_start = pythontime.time()
 
@@ -2738,22 +2745,22 @@ class Scheduler(ServerNode):
 
         metrics["Store-Paths-Redis"] = _store_paths_redis_length
 
-        print("[ {} ] Done storing paths in Redis. Invoking Lambdas now.".format(datetime.datetime.utcnow()))
+        logger.debug("Done storing paths in Redis. Invoking Lambdas now.")
 
         # Construct a payload to send to the Redis proxy containing the keys for all paths 
         # in this graph. The proxy can then just grab the paths from Redis (and thus the path nodes).
         path_keys_for_proxy = [_key + PATH_KEY_SUFFIX for _key in serialized_paths]
         if self.print_debug and self.print_level <= 1:
-            print("Path keys for Redis Proxy: ", path_keys_for_proxy)
+            logger.debug("Path keys for Redis Proxy: ", path_keys_for_proxy)
         #payload_for_proxy = {"op": "graph-init", "path-keys": path_keys_for_proxy, "scheduler-address": self.address}
 
         #self.loop.add_callback(self.send_message_to_proxy, payload = payload_for_proxy)
 
         if self.print_debug and self.print_level <= 1:
-            print("Stored the following paths in Redis: ")
+            logger.debug("Stored the following paths in Redis: ")
             for task_key in serialized_paths:
                 path_key = task_key + PATH_KEY_SUFFIX
-                print(path_key)
+                logger.debug(path_key)
 
         _invoke_leaf_tasks_start = pythontime.time()
         
@@ -2807,7 +2814,7 @@ class Scheduler(ServerNode):
                 self.seen_leaf_tasks[leaf_task_key] = True 
             else:
                 if self.print_debug and self.print_level <= 2:
-                    print("[LEAF TASK] Encountered leaf task {} while invoking. It has been seen before.".format(leaf_task_key))
+                    logger.debug("[LEAF TASK] Encountered leaf task {} while invoking. It has been seen before.".format(leaf_task_key))
                     
                     # Leaf Lambdas will be subscribed to a channel with name of the form PREFIX + leaf_task_key + PATH_SUFFIX.
                     #channel = leaf_task_channel_prefix + leaf_task_key + PATH_KEY_SUFFIX
@@ -2832,7 +2839,7 @@ class Scheduler(ServerNode):
                     #    num_invoked += 1
                     #else:
                     #num_existing += 1
-                    print("\tOpting not to invoke Lambda for {}".format(leaf_task_key))
+                    logger.debug("\tOpting not to invoke Lambda for {}".format(leaf_task_key))
                 #channel = leaf_task_key + PATH_KEY_SUFFIX
                 num_existing += 1
                 # Publish message to the Lambda.
@@ -2843,24 +2850,24 @@ class Scheduler(ServerNode):
         _invoke_leaf_tasks_stop = pythontime.time()
         _invoke_leaf_tasks_length = _invoke_leaf_tasks_stop - _invoke_leaf_tasks_start
 
-        metrics["Invoke-Leaf-Tasks"] = _invoke_leaf_tasks_length
+        metrics["Enqueue-Leaf-Task-Invocations"] = _invoke_leaf_tasks_length
 
-        print("[ {} ] - Scheduler: {} leaf tasks have been submitted for invocation while {} were already existing ({} total).".format(datetime.datetime.utcnow(), num_invoked, num_existing, len(leaf_tasks)))
+        logger.debug("[ {} ] - Scheduler: {} leaf tasks have been submitted for invocation while {} were already existing ({} total).".format(datetime.datetime.utcnow(), num_invoked, num_existing, len(leaf_tasks)))
 
-        print("[INFO] Largest Fanout: Task {} with a fanout factor of {}!".format(largest_fanout_task_key, largest_fanout))
+        logger.debug("[INFO] Largest Fanout: Task {} with a fanout factor of {}!".format(largest_fanout_task_key, largest_fanout))
         if (self.print_debug and self.print_level <= 1):
             # Avoid ZeroDivisionErrors by checking length of arrays before attempting to divide by said lengths. That being said,
             # these lengths should almost always be non-zero.
             if len(task_sizes) != 0:
-                print("[INFO] Average task size: {} bytes.".format(sum(task_sizes) / len(task_sizes)))
+                logger.debug("[INFO] Average task size: {} bytes.".format(sum(task_sizes) / len(task_sizes)))
             else:
                 # Print some sort of warning since zero tasks may indicate an error...
-                print("[WARNING] There were no tasks. Average task size in bytes: N/A.")
+                logger.debug("[WARNING] There were no tasks. Average task size in bytes: N/A.")
             if len(path_sizes) != 0:
-                print("[INFO] Average path size: {} bytes.".format(sum(path_sizes) / len(path_sizes)))
+                logger.debug("[INFO] Average path size: {} bytes.".format(sum(path_sizes) / len(path_sizes)))
             else:
                 # Print some sort of warning since zero tasks may indicate an error...
-                print("[WARNING] There were no paths. Average path size in bytes: N/A.")
+                logger.debug("[WARNING] There were no paths. Average path size in bytes: N/A.")
 
         # TO-DO: 
         # - Serialize each path.
@@ -2885,11 +2892,11 @@ class Scheduler(ServerNode):
         if self.digests is not None:
             self.digests["update-graph-duration"].add(end - start)
         _now = datetime.datetime.utcnow()
-        print("Number of Tasks: ", len(tasks))
-        print("Number of Leaf Tasks: ", len(leaf_tasks))        
-        print("[ {} ] Scheduler - INFO: Update graph duration was {} seconds.".format(_now, end - start))
+        logger.debug("Number of Tasks: %d" % len(tasks))
+        logger.debug("Number of Leaf Tasks: %d" % len(leaf_tasks))        
+        logger.debug("Update graph duration was {} seconds.".format(end - start))
         for _label,_length in metrics.items():
-            print("{} took {} seconds...".format(_label, _length))
+            logger.debug("{} took {} seconds...".format(_label, _length))
         # TODO: balance workers
 
     def construct_basic_task_payload(self, task_key, ts, already_executed = False, persist = False):
@@ -3839,7 +3846,7 @@ class Scheduler(ServerNode):
         """
         assert client is not None
         comm.name = "Scheduler->Client"
-        logger.info("Receive client connection: %s", client)
+        # logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client)
         try:
@@ -4737,7 +4744,7 @@ class Scheduler(ServerNode):
     def clear_task_state(self):
         # XXX what about nested state such as ClientState.wants_what
         # (see also fire-and-forget...)
-        logger.info("Clear task state")
+        # logger.info("Clear task state")
         for collection in self._task_state_collections:
             collection.clear()
 

@@ -26,7 +26,16 @@ import random
 import string 
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
+logFormatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setLevel(logging.INFO)
+consoleHandler.setFormatter(logFormatter)
+
+# Add console handler to logger
+logger.addHandler(consoleHandler)
 
 class BatchedLambdaInvoker(object):
     """ Batch Lambda invocations 
@@ -161,10 +170,10 @@ class BatchedLambdaInvoker(object):
             self.batch_count += 1
             self.next_deadline = self.loop.time() + self.interval            # Break the payload up into chunks -- one chunk for each invoker process AND the Scheduler process itself.
             payload_chunk_size = ceil(len(payload) / (self.num_invokers + 1))    # We divide by num_invokers + 1 since the Scheduler can also invoke Lambda functions itself.
-            print("[ {} ] Size of payload (number of things that were in buffer): {}".format(datetime.datetime.utcnow(), len(payload)))
-            print("[ {} ] Payload Chunk Size: {}".format(datetime.datetime.utcnow(), payload_chunk_size))
+            logger.debug("Size of payload (number of things that were in buffer): {}".format(len(payload)))
+            logger.debug("Payload Chunk Size: {}".format(payload_chunk_size))
             payloads = [payload[x : x + payload_chunk_size] for x in range(0, len(payload), payload_chunk_size)]
-            print("[ {} ] Number of payloads created: {}".format(datetime.datetime.utcnow(), len(payloads)))
+            logger.debug("Number of payloads created: {}".format(len(payloads)))
             # The scheduler gets the first payload. This is important because,
             # in the case where there is only one payload, we want the Scheduler 
             # to invoke the Lambda function itself.
@@ -233,8 +242,7 @@ class BatchedLambdaInvoker(object):
                     #print("                               Total Lambdas Invoked: {}. Total # Tasks Invoked: {}".format(self.total_lambdas_invoked, self.num_tasks_invoked))
                     #print("                               The Scheduler has spent {} seconds calling invoke() so far.".format(self.time_spent_invoking))                                      
                 else:
-                    timestamp_now = datetime.datetime.utcnow()
-                    print("[ {} ] BatchedLambdaInvoker - invoking {} tasks directly/normally.".format(timestamp_now, len(scheduler_payload)))
+                    logger.debug("Invoking %d tasks directly/normally." % len(scheduler_payload))
                     send_start_time = time.time()
                     # Send each chunk to an invocation of the AWS Lambda function for evaluation.
                     total_time_spent_serializing = 0
@@ -257,10 +265,10 @@ class BatchedLambdaInvoker(object):
                     # The self.time_spent_invoking variable is the total time we've spent calling invoke() over the
                     # entire lifetime of this Scheduler/batched lambda invoker object (not just the most recent set of invocations).
                     self.time_spent_invoking += total_time_spent_invoking
-                    print("\n[ {} ] BatchedLambdaInvoker - INFO: Invoked {} Lambda functions in {} seconds.".format(timestamp_now, len(scheduler_payload), send_done_time - send_start_time))
-                    print("                               Serialization took {} seconds. Invocation took {} seconds.".format(total_time_spent_serializing, total_time_spent_invoking))
-                    print("                               Total Lambdas Invoked: {}. Total # Tasks Invoked: {}".format(self.total_lambdas_invoked, self.num_tasks_invoked))
-                    print("                               The Scheduler has spent {} seconds calling invoke() so far.".format(self.time_spent_invoking))
+                    logger.debug("Invoked {} Lambda functions in {} seconds.".format(len(scheduler_payload), send_done_time - send_start_time))
+                    logger.debug("\tSerialization took {} seconds. Invocation took {} seconds.".format(total_time_spent_serializing, total_time_spent_invoking))
+                    logger.debug("\tTotal Lambdas Invoked: {}. Total # Tasks Invoked: {}".format(self.total_lambdas_invoked, self.num_tasks_invoked))
+                    logger.debug("\tThe Scheduler has spent {} seconds calling invoke() so far.".format(self.time_spent_invoking))
             except Exception as ex:
                 print("[ERROR] Wukong Lambda Invoker has encountered an exception while invoking serverless functions.")
                 print("[ERROR] Exception: %s" % str(ex))

@@ -46,6 +46,19 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 from tornado.netutil import bind_sockets
 import tornado 
+import logging 
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+logFormatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setLevel(logging.DEBUG)
+consoleHandler.setFormatter(logFormatter)
+
+# Add console handler to logger
+logger.addHandler(consoleHandler)
 
 define('proxy_port', default=8989, help="TCP port to use for the proxy itself")
 define('encoding', default='utf-8', help="String encoding")
@@ -88,8 +101,8 @@ class RedisProxy(object):
         self.server.listen(options.proxy_port)
         self.port = options.proxy_port
         self.need_to_process = []
-        #print("Redis proxy listening at {}:{}".format(self.redis_endpoint, self.port))
-        print("Redis proxy listening on port {}".format(self.port))
+        #logger.debug("Redis proxy listening at {}:{}".format(self.redis_endpoint, self.port))
+        logger.debug("Redis proxy listening on port {}".format(self.port))
         
         self.loop = IOLoop.current()
 
@@ -105,9 +118,9 @@ class RedisProxy(object):
 
     @gen.coroutine
     def connect_to_redis_servers(self):
-        print("[ {} ] Connecting to Redis server...".format(datetime.datetime.utcnow()))
+        logger.debug("[ {} ] Connecting to Redis server...".format(datetime.datetime.utcnow()))
         self.redis_client = yield aioredis.create_redis(address = (self.redis_host, 6379))
-        print("[ {} ] Connected to Redis successfully!".format(datetime.datetime.utcnow()))
+        logger.debug("[ {} ] Connected to Redis successfully!".format(datetime.datetime.utcnow()))
 
     @gen.coroutine
     def process_task(self, task_key, _value_encoded = None, message = None):   
@@ -120,7 +133,7 @@ class RedisProxy(object):
                 message (dict): The message that was originally sent to the proxy.
         """   
         if self.print_debug:
-            print("[ {} ] Processing task {} now...".format(datetime.datetime.utcnow(), task_key))
+            logger.debug("[ {} ] Processing task {} now...".format(datetime.datetime.utcnow(), task_key))
         
         # Decode the value but keep it serialized.              
         value_encoded = _value_encoded or message["value-encoded"]
@@ -146,11 +159,11 @@ class RedisProxy(object):
         # Store the result in redis.
         #if sys.getsizeof(value_serialized) > task_payload["storage_threshold"]:
         #    redis_instance = self.big_hash_ring.get_node_instance(task_key) #[task_key].set(task_key, value_serialized)
-        #    print("[ {} ] Storing task {} in Big Redis instance listening at {}".format(datetime.datetime.utcnow(), task_key, redis_instance.address))
+        #    logger.debug("[ {} ] Storing task {} in Big Redis instance listening at {}".format(datetime.datetime.utcnow(), task_key, redis_instance.address))
         #    yield redis_instance.set(task_key, value_serialized)
         #else:
         #    redis_instance = self.small_hash_ring.get_node_instance(task_key) #[task_key].set(task_key, value_serialized)
-        #    print("[ {} ] Storing task {} in Small Redis instance listening at {}".format(datetime.datetime.utcnow(), task_key, redis_instance.address))
+        #    logger.debug("[ {} ] Storing task {} in Small Redis instance listening at {}".format(datetime.datetime.utcnow(), task_key, redis_instance.address))
         #    yield redis_instance.set(task_key, value_serialized)
 
         self.completed_tasks.add(task_key)
@@ -158,10 +171,10 @@ class RedisProxy(object):
         num_dependencies_of_dependents = task_payload["num-dependencies-of-dependents"]
         can_now_execute = []
 
-        print("[ {} ] Value for {} successfully stored in Redis. Checking dependencies/invoke nodes now...".format(datetime.datetime.utcnow(), task_key))
+        logger.debug("[ {} ] Value for {} successfully stored in Redis. Checking dependencies/invoke nodes now...".format(datetime.datetime.utcnow(), task_key))
 
         if self.print_debug:
-            print("[ {} ] [PROCESSING] Now processing the downstream tasks for task {}".format(datetime.datetime.utcnow(), task_key))
+            logger.debug("[ {} ] [PROCESSING] Now processing the downstream tasks for task {}".format(datetime.datetime.utcnow(), task_key))
 
         for invoke_key in task_node.invoke:
             futures = []
@@ -193,23 +206,23 @@ class RedisProxy(object):
             # If the task is not yet ready, then we don't do anything further with it at this point.
             if dependencies_completed == num_dependencies:
                 if self.print_debug:
-                    print("[DEP. CHECKING] - task {} is now ready to execute as all {} dependencies have been computed.".format(invoke_key, num_dependencies))
+                    logger.debug("[DEP. CHECKING] - task {} is now ready to execute as all {} dependencies have been computed.".format(invoke_key, num_dependencies))
                 can_now_execute.append(invoke_node)
             else:
                 if self.print_debug:
-                    print("[DEP. CHECKING] - task {} cannot execute yet. Only {} out of {} dependencies have been computed.".format(invoke_key, dependencies_completed, num_dependencies))
-                    print("\nMissing dependencies: ")
+                    logger.debug("[DEP. CHECKING] - task {} cannot execute yet. Only {} out of {} dependencies have been computed.".format(invoke_key, dependencies_completed, num_dependencies))
+                    logger.debug("\nMissing dependencies: ")
                     deps = invoke_node.task_payload["dependencies"]
                     for dep_task_key in deps:
                         if dep_task_key not in self.completed_tasks:
-                            print("     ", dep_task_key)
-                            print("\n")
+                            logger.debug("     ", dep_task_key)
+                            logger.debug("\n")
             
         # Invoke all of the ready-to-execute tasks in parallel.
-        # print("[ {} ] Invoking {} of the {} downstream tasks of current task {}:".format(datetime.datetime.utcnow(), len(can_now_execute), len(task_node.invoke), task_key))
+        # logger.debug("[ {} ] Invoking {} of the {} downstream tasks of current task {}:".format(datetime.datetime.utcnow(), len(can_now_execute), len(task_node.invoke), task_key))
         # for node in can_now_execute:
-        #     print("     ", node.task_key)
-        # print("\n")
+        #     logger.debug("     ", node.task_key)
+        # logger.debug("\n")
         for invoke_node in can_now_execute:
             # We're going to check and see if we can send the previous task's data along with the path. 
             # If not, then the Lambda function will just have to retrieve the data from Redis instead.
@@ -220,7 +233,7 @@ class RedisProxy(object):
             # We can only send a payload of size 256,000 bytes or less to a Lambda function directly.
             # If the payload is too large, then the Lambda will retrieve the data from Redis.
             if combined_size < 256000:
-                #print("Payload (before any deserialization or anything): ", payload)
+                #logger.debug("Payload (before any deserialization or anything): ", payload)
 
                 # Deserialize the payload so we can modify it. 
                 payload = ujson.loads(payload)
@@ -236,7 +249,7 @@ class RedisProxy(object):
                 payload = ujson.dumps({"path-key": invoke_node.task_key + "---path", "invoked-by": task_key})
             
             if self.print_debug:
-                print("[INVOKE] Invoking Task Executor for task {}.".format(invoke_node.task_key))
+                logger.debug("[INVOKE] Invoking Task Executor for task {}.".format(invoke_node.task_key))
             self.lambda_invoker.send(payload)            
 
     @gen.coroutine
@@ -260,33 +273,33 @@ class RedisProxy(object):
                     frame = b""
                 frames.append(frame)
         except StreamClosedError as e:
-            print("[ {} ] [ERROR] - Stream Closed Error: stream from address {} is closed...".format(datetime.datetime.utcnow(), address))
-            print("Real Error: ", e.real_error.__str__())
+            logger.error("Stream Closed Error: stream from address {} is closed...".format(address))
+            logger.error("Real Error: ", e.real_error.__str__())
             raise
         except AssertionError as e:
             _, _, tb = sys.exc_info()
             traceback.print_tb(tb) # Fixed format
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
-            print('An error occurred on line {} in statement {}. Currently processing a stream from addresss {}.'.format(line, text, address))
+            logger.error('An error occurred on line {} in statement {}. Currently processing a stream from addresss {}.'.format(line, text, address))
             raise 
         else:
             try:
                 message = yield from_frames(frames)
             except EOFError:
-                print("[ {} ] [ERROR] - Aborted stream on truncated data".format(datetime.datetime.utcnow()))
+                logger.error("Aborted stream on truncated data")
                 raise CommClosedError("aborted stream on truncated data")
         
         # The 'op' (operation) entry specifies what the Proxy should do. 
         op = message["op"]
 
-        print("[ DEBUG ] \n\tMessage: {}".format(message))
+        logger.debug("Message: {}".format(message))
 
         yield self.handlers[op](message, address = address, stream = stream)
 
     @gen.coroutine
     def handle_IO(self, message, **kwargs):
-        print("handle_io kwargs: {}".format(kwargs))
+        logger.debug("handle_io kwargs: {}".format(kwargs))
         stream = kwargs['stream']
         address = kwargs['address']
         local_address = "tcp://" + get_stream_address(stream)
@@ -306,17 +319,17 @@ class RedisProxy(object):
             fargate_arn = fargate_node[FARGATE_ARN_KEY]
             task_key = message[TASK_KEY]
             redis_operation = message['redis-op']
-            print("[ {} ] Handling Redis IO {} for task {}, Fargate Node {} listening at {}:6379".format(datetime.datetime.utcnow(), redis_operation, task_key, fargate_arn, fargate_ip))
+            logger.debug("[ {} ] Handling Redis IO {} for task {}, Fargate Node {} listening at {}:6379".format(datetime.datetime.utcnow(), redis_operation, task_key, fargate_arn, fargate_ip))
 
             if redis_operation == "set":
                 # Grab the associated task node.
                 if task_key not in self.path_nodes:
                     # This can happen if the Lambda function executes before the proxy finishes processing the DAG info sent by the Scheduler. 
                     # In these situations, we add the messages to a list that gets processed once the DAG-processing concludes.
-                    # print("[ {} ] [WARNING] {} is not currently contained within self.path_nodes... Will try to process again later...".format(datetime.datetime.utcnow(), task_key))
+                    # logger.debug("[ {} ] [WARNING] {} is not currently contained within self.path_nodes... Will try to process again later...".format(datetime.datetime.utcnow(), task_key))
                     self.need_to_process.append([message])
                 else:
-                    # print("[ {} ] The task {} is contained within self.path_nodes. Processing now...".format(datetime.datetime.utcnow(), task_key))
+                    # logger.debug("[ {} ] The task {} is contained within self.path_nodes. Processing now...".format(datetime.datetime.utcnow(), task_key))
                     yield self.process_task(task_key, _value_encoded = None, message = message)                
                 
 
@@ -326,17 +339,17 @@ class RedisProxy(object):
         # possibly invoke downstream tasks, particularly when there is a large fan-out factor for a given node/task.
  
         task_key = message[TASK_KEY]
-        print("[ {} ] [OPERATION - set] Received 'set' operation from a Lambda. Task Key: {}.".format(datetime.datetime.utcnow(), task_key))
+        logger.debug("[ {} ] [OPERATION - set] Received 'set' operation from a Lambda. Task Key: {}.".format(datetime.datetime.utcnow(), task_key))
 
         # Grab the associated task node.
         if task_key not in self.path_nodes:
             # This can happen if the Lambda function executes before the proxy finishes processing the DAG info sent by the Scheduler. 
             # In these situations, we add the messages to a list that gets processed once the DAG-processing concludes.
-            # print("[ {} ] [WARNING] {} is not currently contained within self.path_nodes... Will try to process again later...".format(datetime.datetime.utcnow(), task_key))
+            # logger.debug("[ {} ] [WARNING] {} is not currently contained within self.path_nodes... Will try to process again later...".format(datetime.datetime.utcnow(), task_key))
             self.need_to_process.append([message])
             return
         else:
-            # print("[ {} ] The task {} is contained within self.path_nodes. Processing now...".format(datetime.datetime.utcnow(), task_key))
+            # logger.debug("[ {} ] The task {} is contained within self.path_nodes. Processing now...".format(datetime.datetime.utcnow(), task_key))
             yield self.process_task(task_key, message = message, _value_encoded = None)
 
     @gen.coroutine
@@ -345,7 +358,7 @@ class RedisProxy(object):
         path_keys = message["path-keys"]
 
         if len(path_keys) == 0:
-            print("[WARNING] Received graph-init operation from Scheduler, but the list of path keys was empty...")
+            logger.debug("[WARNING] Received graph-init operation from Scheduler, but the list of path keys was empty...")
         else:
             response = yield self.redis_client.mget(*path_keys)
 
@@ -382,7 +395,7 @@ class RedisProxy(object):
         stream = kwargs["stream"]
         address = kwargs["address"]
         # This operation needs to happen before anything else. Scheduler should be started *after* the proxy is started in order for this to work.
-        print("[ {} ] [OPERATION - start] Received 'start' operation from Scheduler.".format(datetime.datetime.utcnow()))
+        logger.debug("[ {} ] [OPERATION - start] Received 'start' operation from Scheduler.".format(datetime.datetime.utcnow()))
         self.redis_channel_names = message["redis-channel-names"]
         self.scheduler_address = message["scheduler-address"]
 
@@ -392,7 +405,7 @@ class RedisProxy(object):
             
         # Start a certain number of Redis polling processes to listen for results.
         num_redis_processes_to_create = math.ceil(cores_remaining * 0.5)
-        print("Creating {} 'Redis Polling' processes.".format(num_redis_processes_to_create))
+        logger.debug("Creating {} 'Redis Polling' processes.".format(num_redis_processes_to_create))
 
         self.redis_channel_names_for_proxy = []
         self.base_channel_name = "redis-proxy-"
@@ -421,17 +434,17 @@ class RedisProxy(object):
         #self.scheduler_address = yield self.small_redis_clients[0].get("scheduler-address")
         #self.scheduler_address = yield self.redis_client.get("scheduler-address").decode()
 
-        print("[START Operation] Retrieved Scheduler's address from Redis: {}".format(self.scheduler_address))
+        logger.debug("[START Operation] Retrieved Scheduler's address from Redis: {}".format(self.scheduler_address))
 
         payload = {"op": "redis-proxy-channels", "num_channels": len(self.redis_channel_names_for_proxy), "base_name": self.base_channel_name}
-        print("[ {} ] Payload for Scheduler: {}.".format(datetime.datetime.utcnow(), payload))
+        logger.debug("[ {} ] Payload for Scheduler: {}.".format(datetime.datetime.utcnow(), payload))
         local_address = "tcp://" + get_stream_address(stream)
         self.scheduler_comm = TCP(stream, local_address, "tcp://" + address[0], deserialize = True)
-        print("[ {} ] Writing message to Scheduler...".format(datetime.datetime.utcnow()))
+        logger.debug("[ {} ] Writing message to Scheduler...".format(datetime.datetime.utcnow()))
         bytes_written = yield self.scheduler_comm.write(payload)
-        print("[ {} ] Wrote {} bytes to Scheduler...".format(datetime.datetime.utcnow(), bytes_written))
+        logger.debug("[ {} ] Wrote {} bytes to Scheduler...".format(datetime.datetime.utcnow(), bytes_written))
         self.loop.spawn_callback(self.consume_redis_queue)
-        print("Now for handle comm")
+        logger.debug("Now for handle comm")
         #payload2 = {"op": "debug-msg", "message": "[ {} ] Goodbye, world!".format(datetime.datetime.utcnow())}
         #yield self.scheduler_comm.write(payload2)
         #self.loop.spawn_callback(self.hello_world)
@@ -439,7 +452,7 @@ class RedisProxy(object):
         
     @gen.coroutine
     def hello_world(self):
-        print("Hello World starting...")
+        logger.debug("Hello World starting...")
         counter = 0
         while True:
             _now = datetime.datetime.utcnow()
@@ -450,7 +463,7 @@ class RedisProxy(object):
                 
     @gen.coroutine 
     def handle_stream(self, stream, address):
-        print("[ {} ] Starting established connection with {}".format(datetime.datetime.utcnow(), address))
+        logger.debug("[ {} ] Starting established connection with {}".format(datetime.datetime.utcnow(), address))
 
         io_error = None
         closed = False        
@@ -458,28 +471,28 @@ class RedisProxy(object):
         try:
             while not closed:
                 if self.print_debug:
-                    print("[ {} ] Message received from address {}. Handling now...".format(datetime.datetime.utcnow(), address))
+                    logger.debug("[ {} ] Message received from address {}. Handling now...".format(datetime.datetime.utcnow(), address))
                 yield self.deserialize_and_process_message(stream, address = address)
         except (CommClosedError, EnvironmentError) as e:
             io_error = e
             closed = True 
         except StreamClosedError as e:
-            print("[ERROR] Stream closed")
-            print("Real Error: ", e.real_error.__str__())
+            logger.error("Stream closed")
+            logger.error("Real Error: ", e.real_error.__str__())
             closed = True 
         except AssertionError as e:
             _, _, tb = sys.exc_info()
             traceback.print_tb(tb) # Fixed format
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
-            print('An error occurred in file {} on line {} in statement "{}". Currently processing a stream from addresss {}.'.format(filename, line, text, address))
+            logger.error('An error occurred in file {} on line {} in statement "{}". Currently processing a stream from addresss {}.'.format(filename, line, text, address))
             raise
         except Exception as e:
             _, _, tb = sys.exc_info()
             traceback.print_tb(tb) # Fixed format
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
-            print('An error occurred in file {} on line {} in statement "{}". Currently processing a stream from addresss {}.'.format(filename, line, text, address))
+            logger.debug('An error occurred in file {} on line {} in statement "{}". Currently processing a stream from addresss {}.'.format(filename, line, text, address))
             raise 
         finally:
             stream.close()
@@ -488,7 +501,7 @@ class RedisProxy(object):
     @gen.coroutine
     def handle_comm(self, comm, extra=None, every_cycle=[]):
         extra = extra or {}
-        print("[ {} ] Starting established TCP Comm connection with {}".format(datetime.datetime.utcnow(), comm._peer_addr))
+        logger.debug("[ {} ] Starting established TCP Comm connection with {}".format(datetime.datetime.utcnow(), comm._peer_addr))
 
         io_error = None
         closed = False
@@ -510,17 +523,17 @@ class RedisProxy(object):
                 close_desired = msg.get("close", False)
                 msg = result = None
                 if close_desired:
-                    print("[ {} ] Close desired. Closing comm.".format(datetime.datetime.utcnow()))
+                    logger.debug("[ {} ] Close desired. Closing comm.".format(datetime.datetime.utcnow()))
                     yield comm.close()
                 if comm.closed():
                     break
             except (CommClosedError, EnvironmentError) as e:
                 io_error = e
-                print("[ {} ] [ERROR] CommClosedError, EnvironmentError: {}".format(datetime.datetime.utcnow(), e.__str__()))
+                logger.error("CommClosedError, EnvironmentError: {}".format(e.__str__()))
                 raise 
                 break
             except Exception as e:
-                print("[ {} ] [ERROR] Exception: {}".format(datetime.datetime.utcnow(), e.__str__()))
+                logger.error("Exception: {}".format(e.__str__()))
                 raise 
                 break
 
@@ -528,11 +541,11 @@ class RedisProxy(object):
         ''' This function defines a process which continually polls Redis for messages. 
         
             When a message is found, it is passed to the main Scheduler process via the queue given to this process. ''' 
-        print("Redis Polling Process started. Polling channel ", redis_channel_name)
+        logger.debug("Redis Polling Process started. Polling channel ", redis_channel_name)
 
         redis_client = redis.StrictRedis(host=redis_endpoint, port = 6379, db = 0)
 
-        print("[ {} ] Redis polling processes connected to Redis Client at {}:{}".format(datetime.datetime.utcnow(), redis_endpoint, 6379))
+        logger.debug("[ {} ] Redis polling processes connected to Redis Client at {}:{}".format(datetime.datetime.utcnow(), redis_endpoint, 6379))
 
         base_sleep_interval = 0.05 
         max_sleep_interval = 0.15 
@@ -551,7 +564,7 @@ class RedisProxy(object):
             message = redis_channel.get_message()
             if message is not None:
                 timestamp_now = datetime.datetime.utcnow()
-                # print("[ {} ] Received message from channel {}.".format(timestamp_now, redis_channel_name))   
+                # logger.debug("[ {} ] Received message from channel {}.".format(timestamp_now, redis_channel_name))   
                 data = message["data"]
                 # The message should be a "bytes"-like object so we decode it.
                 # If we neglect to turn off the subscribe/unsubscribe confirmation messages,
@@ -559,7 +572,7 @@ class RedisProxy(object):
                 # We ignore these by catching the exception and simply passing.
                 data = data.decode()
                 data = ujson.loads(data)
-                # print("Data: ", data)
+                # logger.debug("Data: ", data)
                 _queue.put([data])
                 consecutive_misses = 0
                 current_sleep_interval = base_sleep_interval
@@ -574,7 +587,7 @@ class RedisProxy(object):
     def consume_redis_queue(self):
         ''' This function executes periodically (as a PeriodicCallback on the IO loop). 
         It reads messages from the message queue until none are available.'''
-        # print("Consume Redis Queue is being executed...")
+        # logger.debug("Consume Redis Queue is being executed...")
         while True:
             messages = []
             # 'end' is the time at which we should stop iterating. By default, it is 50ms.
@@ -591,29 +604,29 @@ class RedisProxy(object):
                 except queue.Empty:
                     break
             if len(messages) > 0:
-                # print("[ {} ] Processing {} messages from Redis Message Queue.".format(datetime.datetime.utcnow(), len(messages)))
+                # logger.debug("[ {} ] Processing {} messages from Redis Message Queue.".format(datetime.datetime.utcnow(), len(messages)))
                 for message in messages:
                     if "op" in message:
                         op = message["op"]
                         if op == "set":
                             task_key = message[TASK_KEY]
                             value_encoded = message["value-encoded"]
-                            print("[ {} ] [OPERATION - set] Received 'set' operation from a Lambda. Task Key: {}.".format(datetime.datetime.utcnow(), task_key))
+                            logger.debug("[ {} ] [OPERATION - set] Received 'set' operation from a Lambda. Task Key: {}.".format(datetime.datetime.utcnow(), task_key))
 
                             # Grab the associated task node.
                             if task_key not in self.path_nodes:
                                 # This can happen if the Lambda function executes before the proxy finishes processing the DAG info sent by the Scheduler. 
                                 # In these situations, we add the messages to a list that gets processed once the DAG-processing concludes.
-                                # print("[ {} ] [WARNING] {} is not currently contained within self.path_nodes... Will try to process again later...".format(datetime.datetime.utcnow(), task_key))
+                                # logger.debug("[ {} ] [WARNING] {} is not currently contained within self.path_nodes... Will try to process again later...".format(datetime.datetime.utcnow(), task_key))
                                 self.need_to_process.append([message])
                                 continue 
                             else:
-                                # print("[ {} ] The task {} is contained within self.path_nodes. Processing now...".format(datetime.datetime.utcnow(), task_key))
+                                # logger.debug("[ {} ] The task {} is contained within self.path_nodes. Processing now...".format(datetime.datetime.utcnow(), task_key))
                                 yield self.process_task(task_key, _value_encoded = value_encoded, message = message)
                         else:
-                            print("[ {} ] [ERROR] Unknown Operation from Redis Queue... Message: {}".format(datetime.datetime.utcnow(), message))
+                            logger.error("Unknown Operation from Redis Queue... Message: {}".format(message))
                     else:
-                        print("[ {} ] [ERROR] Message from Redis Queue did NOT contain an operation... Message: {}".format(datetime.datetime.utcnow(), message))
+                        logger.error("Message from Redis Queue did NOT contain an operation... Message: {}".format(message))
             # Sleep for 5 milliseconds...
             yield gen.sleep(0.005)
 @gen.coroutine
@@ -633,7 +646,7 @@ if __name__ == "__main__":
     aws_region = args["aws_region"][0]
     redis_host = args["redis_hostname"][0]
 
-    print("aws_region: ", aws_region)
+    logger.debug("aws_region: %s" % aws_region)
     lambda_client = boto3.client('lambda', region_name=aws_region)
 
     # Start the proxy.
