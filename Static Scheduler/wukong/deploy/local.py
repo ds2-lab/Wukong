@@ -116,6 +116,8 @@ class LocalCluster(SpecCluster):
         The number of Fargate nodes to use in the Storage Cluster.
     reuse_lambdas: bool
         Attempt to re-use existing Lambda functions between iterations of iterative workloads.
+    wukong_config_path: str
+        Path to the wukong-config.yaml configuration file.
     
     Examples
     --------
@@ -164,6 +166,7 @@ class LocalCluster(SpecCluster):
         num_lambda_invokers = 16,
         max_task_fanout = 10,
         chunk_large_tasks = False,
+        wukong_config_path = "./wukong-config.yaml",
         big_task_threshold = 50,
         print_debug = False,
         reuse_existing_fargate_tasks_on_startup = True, # If there are already some Fargate tasks appropriately tagged/grouped and already running, should we just use those?
@@ -277,6 +280,7 @@ class LocalCluster(SpecCluster):
                 max_task_fanout = max_task_fanout,
                 num_chunks_for_large_tasks = num_chunks_for_large_tasks,
                 aws_region = aws_region,
+                wukong_config_path = wukong_config_path,
                 num_fargate_nodes = num_fargate_nodes,
                 ecs_cluster_name = ecs_cluster_name,
                 ecs_task_definition = ecs_task_definition,
