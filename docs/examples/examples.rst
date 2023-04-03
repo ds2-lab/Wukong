@@ -12,9 +12,17 @@ Everytime you run a job on Wukong, you'll need to create an instance of the ``Lo
 
     import dask.array as da
     from wukong import LocalCluster, Client
-    local_cluster = LocalCluster(host='0.0.0.0:8786',
-                    proxy_address = '3.83.198.204', 
-                    num_fargate_nodes = 10) 
+    local_cluster = LocalCluster(
+    host="10.0.88.131:8786",
+        proxy_address = "10.0.88.131",
+        proxy_port = 8989,
+        num_lambda_invokers = 4,
+        chunk_large_tasks = False,
+        n_workers = 0,
+        use_local_proxy = True,
+        local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+        redis_endpoints = [("127.0.0.1", 6379)],
+        use_fargate = False)
     client = Client(local_cluster)
 
 In all of the following examples, the code given assumes you've created a local cluster and client object first.
