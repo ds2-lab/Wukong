@@ -959,6 +959,7 @@ class Scheduler(ServerNode):
         use_bit_dep_checking = False,                   # If True, use bit-method of dependency counters.
         debug_mode = False,    # When enabled, the user will step through each call to update_graph, and a significantly larger amount of debug info will print each iteration.
         lambda_debug = False,
+        wukong_config_path = "./wukong-config.yaml",
         use_fargate = True,
         ecs_cluster_name = 'WukongFargateStorage',
         ecs_task_definition = 'WukongRedisNode:1',
@@ -1312,7 +1313,7 @@ class Scheduler(ServerNode):
         # Track info such as how many times each Fargate node has been selected.
         self.fargate_metrics = dict()
 
-        with open("./wukong-config.yaml") as f:
+        with open(wukong_config_path) as f:
             self.wukong_config = yaml.load(f, Loader = yaml.FullLoader) 
             self.aws_config = self.wukong_config["aws_lambda"]
             
