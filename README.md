@@ -52,9 +52,9 @@ The Task Executors are responsible for executing tasks and performing dynamic sc
 
 When setting up Wukong, make sure to update the variables referencing the name of the AWS Lambda function used as the Wukong Task Executor. For example, in "AWS Lambda Task Executor/function.py", this is a variable *lambda_function_name* whose value should be the same as the name of the Lambda function as defined in AWS Lambda itself.
 
-There is also a variable referencing the function's name in "Static Scheduler/distributed/batched_lambda_invoker.py" (as a keyword argument to the constructor of the BatchedLambdaInvoker object) and in "KV Store Proxy/proxy_lambda_invoker.py" (also as a keyword argument to the constructor of ProxyLambdaInvoker).
+There is also a variable referencing the function's name in "Static Scheduler/wukong/batched_lambda_invoker.py" (as a keyword argument to the constructor of the BatchedLambdaInvoker object) and in "KV Store Proxy/proxy_lambda_invoker.py" (also as a keyword argument to the constructor of ProxyLambdaInvoker).
 
-By default, Wukong is configured to run within the us-east-1 region. If you would like to use a different region, then you need to pass the "region_name" parameter to the Lambda Client objects created in "Static Scheduler/distributed/batched_lambda_invoker.py", "KV Store Proxy/proxy_lambda_invoker.py", "KV Store Proxy/proxy.py", "AWS Lambda Task Executor/function.py", and "Static Scheduler/distributed/scheduler.py". 
+By default, Wukong is configured to run within the us-east-1 region. If you would like to use a different region, then you need to pass the "region_name" parameter to the Lambda Client objects created in "Static Scheduler/wukong/batched_lambda_invoker.py", "KV Store Proxy/proxy_lambda_invoker.py", "KV Store Proxy/proxy.py", "AWS Lambda Task Executor/function.py", and "Static Scheduler/wukong/scheduler.py". 
 
 ## Code Examples
 
@@ -88,15 +88,30 @@ LocalCluster(object):
     If True, then Wukong will attempt to use AWS Fargate for its intermediate storage. This requires that the AWS Fargate infrastructure
     already exists and that Wukong has been correctly configured to use it (i.e., passing the required information to the 'LocalCluster'
     instance. This defaults to False, in which case Wukong simply uses a single Redis instance for all intermediate storage.
+  use_local_proxy : bool
+    If True, automatically deploy the KV Store Proxy locally on the same VM as the Static Scheduler.
+    Note that the user should pass a value for the `local_proxy_path` property if setting `use_local_proxy` to True.
+    If not, then Wukong will attempt to locate the proxy in "../KV Store Proxy/", which may or may not work
+    depending on where Wukong is being executed from. 
+  local_proxy_path: str
+    Fully-qualified path to the KV Store Proxy source code, specifically the proxy.py file. 
+    This is only used when `use_local_proxy` is True.
+    Example: "/home/ec2-user/Wukong/KV Store Proxy/proxy.py"
 ```
 
 ### Single-Node DAG Example
 ```python
 import dask.array as da
 from dask import delayed
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -116,9 +131,15 @@ print("Result: %d" % result)
 ```python
 import dask.array as da
 from dask import delayed
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -141,7 +162,7 @@ a = delayed(incr)(5)
 b = delayed(decr)(a)
 c = delayed(double)(b)
 
-result1 = c.compute()
+result1 = c.compute(scheduler = client.get)
 print("Result: %d" % result1)  
 
 # 3-Node DAG with a Fan-In
@@ -149,7 +170,7 @@ x = delayed(incr)(3)
 y = delayed(decr)(7)
 z = delayed(add_values)(x,y)
 
-result2 = z.compute()
+result2 = z.compute(scheduler = client.get)
 print("Result: %d" % result2)  
 
 ```
@@ -158,9 +179,15 @@ print("Result: %d" % result2)
 ``` python
 from dask import delayed 
 import operator 
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -169,15 +196,21 @@ while len(L) > 1:
   L = list(map(delayed(operator.add), L[0::2], L[1::2]))
 
 # Start the computation.
-L[0].compute()
+L[0].compute(scheduler = client.get)
 ```
 
 ### SVD of 'Tall-and-Skinny' Matrix 
 ```python
 import dask.array as da
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -186,15 +219,21 @@ X = da.random.random((200000, 1000), chunks=(10000, 1000))
 u, s, v = da.linalg.svd(X)
 
 # Start the computation.
-v.compute()
+v.compute(scheduler = client.get)
 ```
 
 ### SVD of Square Matrix with Approximation Algorithm
 ```python
 import dask.array as da
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -203,15 +242,21 @@ X = da.random.random((10000, 10000), chunks=(2000, 2000))
 u, s, v = da.linalg.svd_compressed(X, k=5)
 
 # Start the computation.
-v.compute()
+v.compute(scheduler = client.get)
 ```
 
 ### GEMM (Matrix Multiplication) 
 ``` python
 import dask.array as da
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -220,7 +265,7 @@ y = da.random.random((10000, 10000), chunks = (1000, 1000))
 z = da.matmul(x, y)
 
 # Start the computation.
-z.compute() 
+z.compute(scheduler = client.get) 
 ```
 
 ### Parallelizing Prediction (sklearn.svm.SVC)
@@ -232,9 +277,15 @@ from sklearn.svm import SVC
 
 import dask_ml.datasets
 from dask_ml.wrappers import ParallelPostFit
-from distributed import LocalCluster, Client
-local_cluster = LocalCluster(host='0.0.0.0:8786',
-                  proxy_address = '3.83.198.204', 
+from wukong import LocalCluster, Client
+local_cluster = LocalCluster(host='<private IPv4 of Static Scheduler VM>:8786',
+                  proxy_address = '<private IPv4 of KV Store Proxy VM>', 
+                  num_lambda_invokers = 4,
+                  # Automatically create proxy locally. Pass same IPv4 for `host` and `proxy_address`
+                  use_local_proxy = True, 
+                  # Path to `proxy.py` file.
+                  local_proxy_path = "/home/ec2-user/Wukong/KV Store Proxy/proxy.py",
+                  redis_endpoints = [("127.0.0.1", 6379)],
                   use_fargate = False) 
 client = Client(local_cluster)
 
@@ -247,7 +298,7 @@ X, y = dask_ml.datasets.make_classification(n_samples=800000,
                                             chunks=800000 // 20)
 
 # Start the computation.
-clf.predict(X).compute()
+clf.predict(X).compute(scheduler = client.get)
 
 ```
 

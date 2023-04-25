@@ -21,8 +21,8 @@ RUN mkdir /opt/app
 
 ENTRYPOINT ["tini", "-g", "--", "/usr/bin/prepare.sh"]
 
-COPY ./distributed
+COPY ./wukong
 
-WORKDIR /distributed
+WORKDIR /wukong
 
 RUN python setup.py install 

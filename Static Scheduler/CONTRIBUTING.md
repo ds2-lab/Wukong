@@ -7,9 +7,9 @@ code conforms with these styles, run
 
 ``` shell
 $ pip install black flake8
-$ cd path/to/distributed
-$ black distributed
-$ flake8 distributed
+$ cd path/to/wukong
+$ black wukong
+$ flake8 wukong
 ```
 
 [flake8]:http://flake8.pycqa.org/en/latest/
