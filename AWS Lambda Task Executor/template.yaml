@@ -25,7 +25,7 @@ Resources:
       MemorySize: 3008
       Timeout: 200
       Policies:
-        - arn:aws:iam::aws:policy/AWSLambdaFullAccess
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
         - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
         #- arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
@@ -39,7 +39,7 @@ Resources:
       MemorySize: 512
       Timeout: 90
       Policies:
-        - arn:aws:iam::aws:policy/AWSLambdaFullAccess
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
         - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
         #- arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
