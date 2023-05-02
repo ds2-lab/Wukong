@@ -55,8 +55,8 @@ import dask
 
 import sys, os
 sys.path.insert(0, os.path.abspath('..'))
-from pathing import Path, PathNode
-from wukong_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown
+from .pathing import Path, PathNode
+from .wukong_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown
 
 from .protocol import dumps
 from .comm.utils import from_frames

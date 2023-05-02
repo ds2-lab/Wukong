@@ -18,3 +18,8 @@ include distributed/tests/*.pem
 prune docs/_build
 include versioneer.py
 include distributed/_version.py
+
+include wukong/distributed.yaml
+include wukong/bokeh/theme.yaml
+include wukong/wukong-config.yaml
+include wukong/wukong-config.yaml.template
