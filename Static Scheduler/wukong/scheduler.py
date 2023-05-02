@@ -29,6 +29,7 @@ from uhashring import HashRing
 import weakref
 import cloudpickle
 import base64 
+base64.encodestring = base64.encodebytes
 import yaml
 import boto3
 
@@ -113,7 +114,7 @@ consoleHandler.setFormatter(logFormatter)
 # Add console handler to logger
 logger.addHandler(consoleHandler)
 
-ENCODING = 'utf-8' 
+ENCODING = 'utf-8'
 
 # Used when mapping PathNode --> Fargate Task with a dictionary. These are the keys.
 FARGATE_ARN_KEY = "taskARN"
