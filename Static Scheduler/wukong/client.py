@@ -38,8 +38,8 @@ import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
-from dask.compatibility import apply, unicode
-from dask.utils import ensure_dict
+unicode = str
+from dask.utils import ensure_dict, apply
 
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
