@@ -23,4 +23,4 @@ boto3
 ntplib
 redis
 bokeh
-aioredis
+aioredis==1.*
