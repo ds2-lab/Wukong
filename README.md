@@ -305,7 +305,7 @@ clf.predict(X).compute(scheduler = client.get)
 ## To Cite Wukong
 
 ```
-@inproceedings{10.1145/3419111.3421286,
+@inproceedings{socc20-wukong,
 author = {Carver, Benjamin and Zhang, Jingyuan and Wang, Ao and Anwar, Ali and Wu, Panruo and Cheng, Yue},
   title = {Wukong: A Scalable and Locality-Enhanced Framework for Serverless Parallel Computing},
   year = {2020},
@@ -318,7 +318,7 @@ author = {Carver, Benjamin and Zhang, Jingyuan and Wang, Ao and Anwar, Ali and W
 ```
 
 ```
-@INPROCEEDINGS {8955207,
+@INPROCEEDINGS {pdsw19-wukong,
 author = {B. Carver and J. Zhang and A. Wang and Y. Cheng},
   booktitle = {2019 IEEE/ACM Fourth International Parallel Data Systems Workshop (PDSW)},
   title = {In Search of a Fast and Efficient Serverless DAG Engine},
