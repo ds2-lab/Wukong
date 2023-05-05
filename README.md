@@ -1,6 +1,6 @@
 # Wukong
 
-![Logo](./docs/images/wukong_log.png "Wukong's Logo")
+![Logo](docs/images/wukong_log.png "Wukong's Logo")
 
 [![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
 
