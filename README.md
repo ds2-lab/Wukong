@@ -1,6 +1,6 @@
 # Wukong
 
-![Logo](https://github.com/ds2-lab/Wukong/tree/socc2020/docs/images/wukong_logo.png "Wukong's Logo")
+![Logo](https://github.com/ds2-lab/Wukong/tree/socc2020/docs/images/wukong_logo.png)
 
 [![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
 
