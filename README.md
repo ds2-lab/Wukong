@@ -4,7 +4,7 @@
 
 [![Documentation Status](https://readthedocs.org/projects/leap-wukong/badge/?version=latest)](https://leap-wukong.readthedocs.io/en/latest/?badge=latest)
 
-A high-performance and highly scalable serverless parallel computing framework. 
+Wukong is a high-performance and highly scalable locality-aware, serverless workflow and DAG engine. Wukong uses serverless computing to accelerate the execution of DAG-based scientific, linear algebra, machine learning, and data analytics workloads. 
 
 ## What is Wukong?
 
