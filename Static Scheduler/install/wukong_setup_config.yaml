@@ -1,14 +1,18 @@
 # This file is used by the aws_setup.py script when setting up the AWS infrastructure to run Wukong.
-# NOTE: Ensure you have installed the ``boto3`` Python module and the AWS CLI on your computer. 
+# NOTE: Ensure you have installed the ``boto3`` Python module and the AWS CLI on your computer.
 # Likewise, ensure the AWS CLI has been configured so that ``boto3`` can find and use your AWS credentials.
 
-# This is the region in which we'll be creating the AWS infrastructure. 
+# This is the region in which we'll be creating the AWS infrastructure.
 aws_region: us-east-1
 
 # Replace this with your PUBLIC IP. We use this to create a security group rule to enable SSH from your IP address.
 # You can google "what is my IP" or go to https://www.whatsmyip.org/ to get this value. Alternatively, the
 # script will attempt to automatically resolve it for you if you do not change this default value.
 user_public_ip: DEFAULT_VALUE
+
+# You may need to specify these manually if they cannot be resolved automatically.
+aws_access_key_id: ""
+aws_secret_access_key: ""
 
 # These settings are used when setting up the Virtual Private Cloud (VPC) used by Wukong.
 # For certain settings, it is recommended to leave them with their default value unless you definitely have a reason to change them.
@@ -17,7 +21,7 @@ vpc:
   # The name of the VPC.
   Name: WukongVPC
 
-  # This controls the range of IPv4 addresses within the VPC specified in CIDR format. 
+  # This controls the range of IPv4 addresses within the VPC specified in CIDR format.
   # Block sizes must be between a /16 and a /28 netmask. Best to leave this as its default value.
   CidrBlock: 10.0.0.0/16
 
@@ -26,19 +30,19 @@ vpc:
   # These are the CIDR blocks which will be used when creating the private subnets (used by AWS Lambda functions).
   # Important Note: the number of CIDR blocks specified here controls the number of private subnets created.
   PrivateSubnetCidrBlocks:
-   - 10.0.32.0/19
-   - 10.0.0.0/19
-  
+    - 10.0.32.0/19
+    - 10.0.0.0/19
+
   # Name of security group used by Wukong AWS resources.
   #
-  # Max length: 64 characters.  
+  # Max length: 64 characters.
   security_group_name: wukong_serverful_security_group
 
   # This value will be generated automatically if creating the VPC using this script.
   # If skipping the VPC-creation step, then you may optionally provide this value explicitly here.
-  # If this value is not provided explicitly, then the script will attempt to retrieve the 
+  # If this value is not provided explicitly, then the script will attempt to retrieve the
   # security group ID from AWS automatically using the `security_group_name` property.
-  security_group_id: 
+  security_group_id:
 
   # If skipping the VPC-creation step, then this property can be specified directly here.
   # Alternatively, the script will attempt to resolve the private subnet IDs by inspecting
@@ -52,34 +56,34 @@ aws_lambda:
   # Note that this CANNOT be changed once the function is created (you would have to deploy a new function
   # if you wanted to use a different name).
   #
-  # Max length: 64 characters.  
+  # Max length: 64 characters.
   executor_function_name: WukongExecutor
 
   # This will be the name of the AWS Lambda function used as a distributed invoker.
   # Note that this CANNOT be changed once the function is created (you would have to deploy a new function
-  # if you wanted to use a different name). 
+  # if you wanted to use a different name).
   #
   # Max length: 64 characters.
   invoker_function_name: WukongInvoker
 
   # This is the name of the IAM role that will be created for use with the AWS Lambda functions.
   iam_role_name: WukongLambdaRole
-  
-  # The amount of memory that the function should be configured with (in MB). 
+
+  # The amount of memory that the function should be configured with (in MB).
   # Note that this can be changed at any time within the AWS Lambda web console.
   #
   # Minimum value: 128
   # Maximum value: 3008
   function_memory_mb: 3008
 
-  # The maximum duration that the Executor can run before timing out. 
+  # The maximum duration that the Executor can run before timing out.
   # Note that this can be changed at any time within the AWS Lambda web console.
   #
   # Minimum value: 1
   # Maximum value: 900
   function_timeout_seconds: 120
 
-# This configuration is for AWS ECS/AWS Fargate. 
+# This configuration is for AWS ECS/AWS Fargate.
 ecs:
   # The name of the cluster to be created for Wukong's storage cluster.
   #

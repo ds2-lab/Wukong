@@ -75,7 +75,7 @@ def get_arguments():
     
     return parser.parse_args()
 
-def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
+def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, aws_access_key_id:str = None, aws_secret_access_key:str = None):
     """
     This function first creates a Virtual Private Cloud (VPC). 
     Next, it creates an Internet Gateway, allocates an Elastic IP Address, and creates a NAT Gateway.
@@ -93,8 +93,7 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
             If None, then this script will ultimately use the default AWS credentials profile.
 
         NO_COLOR (bool):
-            If True, then print messages will not contain color. Note that colored prints are
-            only supported when running on Linux.
+
         
     Returns:
     --------
@@ -107,17 +106,17 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
     if AWS_PROFILE_NAME is not None:
         print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % AWS_PROFILE_NAME)
         try:
-            session = boto3.Session(profile_name = AWS_PROFILE_NAME)
+            session = boto3.Session(profile_name = AWS_PROFILE_NAME, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
             print_success("Success!")
         except Exception as ex: 
             print_error("Exception encountered while trying to use AWS credentials profile \"%s\"." % AWS_PROFILE_NAME, no_header = False)
             raise ex 
         
-        ec2_resource = session.resource('ec2', region_name = aws_region)
-        ec2_client = session.client('ec2', region_name = aws_region)
+        ec2_resource = session.resource('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
+        ec2_client = session.client('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
     else:
-        ec2_resource = boto3.resource('ec2', region_name = aws_region)
-        ec2_client = boto3.client('ec2', region_name = aws_region)
+        ec2_resource = boto3.resource('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
+        ec2_client = boto3.client('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
 
     CidrBlock = wukong_vpc_config["CidrBlock"]
     PublicSubnetCidrBlock = wukong_vpc_config["PublicSubnetCidrBlock"]
@@ -669,6 +668,14 @@ if __name__ == "__main__":
     
     aws_region = wukong_setup_config["aws_region"]
     user_public_ip = wukong_setup_config["user_public_ip"]
+    aws_access_key_id:str = wukong_setup_config.get("aws_access_key_id", None)
+    aws_secret_access_key:str = wukong_setup_config.get("aws_secret_access_key", None)
+    
+    # Set these to None if the user didn't specify anything.
+    if aws_access_key_id == "":
+        aws_access_key_id = None 
+    if aws_secret_access_key == "":
+        aws_secret_access_key = None 
     
     if user_public_ip == "DEFAULT_VALUE":
         user_public_ip = get('https://api.ipify.org').content.decode('utf8')
@@ -679,7 +686,11 @@ if __name__ == "__main__":
     
     # Step 1: Create the VPC
     if not command_line_args.skip_vpc_creation:
-        results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config)
+        try:
+            results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
+        except botocore.exceptions.NoCredentialsError as ex:
+            print_error("The AWS Python library is unable to locate your AWS credentials.")
+            exit(1)
         private_subnet_ids = results['PrivateSubnetIds']
         security_group_id = results['SecurityGroupId']
     else:
