@@ -6,7 +6,13 @@ import math
 import warnings
 import weakref
 
-from dask.utils import factors
+def factors(n: int) -> set[int]:
+    """Return the factors of an integer
+    https://stackoverflow.com/a/6800214/616616
+    Taken from older version of Dask
+    """
+    seq = ([i, n // i] for i in range(1, int(pow(n, 0.5) + 1)) if n % i == 0)
+    return {j for l in seq for j in l}
 
 from .spec import SpecCluster
 from ..nanny import Nanny
