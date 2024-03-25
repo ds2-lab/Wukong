@@ -19,5 +19,8 @@ ujson
 futures; python_version < '3.0'
 singledispatch; python_version < '3.4'
 pyyaml
-boto3 
+boto3
+ntplib
 redis
+bokeh
+aioredis==1.*
