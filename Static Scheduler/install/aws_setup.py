@@ -75,7 +75,7 @@ def get_arguments():
     
     return parser.parse_args()
 
-def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, aws_access_key_id:str = None, aws_secret_access_key:str = None):
+def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict):
     """
     This function first creates a Virtual Private Cloud (VPC). 
     Next, it creates an Internet Gateway, allocates an Elastic IP Address, and creates a NAT Gateway.
@@ -106,18 +106,18 @@ def create_wukong_vpc(aws_region : str, user_ip: str, wukong_vpc_config : dict, 
     if AWS_PROFILE_NAME is not None:
         print("Attempting to create AWS Session using explicitly-specified credentials profile \"%s\" now..." % AWS_PROFILE_NAME)
         try:
-            session = boto3.Session(profile_name = AWS_PROFILE_NAME, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
+            session = boto3.Session(profile_name = AWS_PROFILE_NAME)
             print_success("Success!")
         except Exception as ex: 
             print_error("Exception encountered while trying to use AWS credentials profile \"%s\"." % AWS_PROFILE_NAME, no_header = False)
             raise ex 
         
-        ec2_resource = session.resource('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
-        ec2_client = session.client('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
+        ec2_resource = session.resource('ec2', region_name = aws_region)
+        ec2_client = session.client('ec2', region_name = aws_region)
     else:
-        ec2_resource = boto3.resource('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
-        ec2_client = boto3.client('ec2', region_name = aws_region, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
-
+        ec2_resource = boto3.resource('ec2', region_name = aws_region)
+        ec2_client = boto3.client('ec2', region_name = aws_region)
+    
     CidrBlock = wukong_vpc_config["CidrBlock"]
     PublicSubnetCidrBlock = wukong_vpc_config["PublicSubnetCidrBlock"]
     PrivateSubnetCidrBlocks = wukong_vpc_config["PrivateSubnetCidrBlocks"]
@@ -428,7 +428,7 @@ def setup_aws_lambda(aws_region : str, wukong_lambda_config : dict, private_subn
     lambda_client.create_function(
         Code = {"ZipFile": open("./wukong_aws_lambda_code.zip", "rb").read()},
         FunctionName = executor_function_name,
-        Runtime = 'python3.7',
+        Runtime = 'python3.9',
         Role = role_arn,
         Handler = 'function.lambda_handler',
         MemorySize = function_memory_mb,
@@ -671,11 +671,8 @@ if __name__ == "__main__":
     aws_access_key_id:str = wukong_setup_config.get("aws_access_key_id", None)
     aws_secret_access_key:str = wukong_setup_config.get("aws_secret_access_key", None)
     
-    # Set these to None if the user didn't specify anything.
-    if aws_access_key_id == "":
-        aws_access_key_id = None 
-    if aws_secret_access_key == "":
-        aws_secret_access_key = None 
+    print("AWS region: \"%s\"" % aws_region)
+    print("AWS Profile Name: \"%s\"" % AWS_PROFILE_NAME)
     
     if user_public_ip == "DEFAULT_VALUE":
         user_public_ip = get('https://api.ipify.org').content.decode('utf8')
@@ -687,9 +684,11 @@ if __name__ == "__main__":
     # Step 1: Create the VPC
     if not command_line_args.skip_vpc_creation:
         try:
-            results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config, aws_access_key_id = aws_access_key_id, aws_secret_access_key = aws_secret_access_key)
+            results = create_wukong_vpc(aws_region, user_public_ip, wukong_vpc_config)
         except botocore.exceptions.NoCredentialsError as ex:
             print_error("The AWS Python library is unable to locate your AWS credentials.")
+            print_error("Please try passing the AWS credentials profile to use via the '--aws-profile' command-line argument for this script.")
+            print_error("If that doesn't work, then it's possible your system's clock is out-of-sync/incorrect.")
             exit(1)
         private_subnet_ids = results['PrivateSubnetIds']
         security_group_id = results['SecurityGroupId']

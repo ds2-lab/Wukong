@@ -10,10 +10,6 @@ aws_region: us-east-1
 # script will attempt to automatically resolve it for you if you do not change this default value.
 user_public_ip: DEFAULT_VALUE
 
-# You may need to specify these manually if they cannot be resolved automatically.
-aws_access_key_id: ""
-aws_secret_access_key: ""
-
 # These settings are used when setting up the Virtual Private Cloud (VPC) used by Wukong.
 # For certain settings, it is recommended to leave them with their default value unless you definitely have a reason to change them.
 # This will be indicated in a comment above the corresponding setting/option.
