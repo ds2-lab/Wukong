@@ -17,7 +17,7 @@ import psutil
 
 import dask
 from dask.core import istask
-from dask.compatibility import apply
+from dask.utils import apply
 
 try:
     from cytoolz import pluck, partial, merge, first

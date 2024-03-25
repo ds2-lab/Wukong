@@ -29,6 +29,7 @@ from uhashring import HashRing
 import weakref
 import cloudpickle
 import base64 
+base64.encodestring = base64.encodebytes
 import yaml
 import boto3
 
@@ -54,8 +55,8 @@ import dask
 
 import sys, os
 sys.path.insert(0, os.path.abspath('..'))
-from pathing import Path, PathNode
-from wukong_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown
+from .pathing import Path, PathNode
+from .wukong_metrics import TaskExecutionBreakdown, LambdaExecutionBreakdown
 
 from .protocol import dumps
 from .comm.utils import from_frames
@@ -113,7 +114,7 @@ consoleHandler.setFormatter(logFormatter)
 # Add console handler to logger
 logger.addHandler(consoleHandler)
 
-ENCODING = 'utf-8' 
+ENCODING = 'utf-8'
 
 # Used when mapping PathNode --> Fargate Task with a dictionary. These are the keys.
 FARGATE_ARN_KEY = "taskARN"
